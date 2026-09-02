@@ -1,11 +1,12 @@
 """
+Author: Baptiste Boussemart
+
 run_bias_sensitivity_real.py
 
 End-to-end script that reproduces the manuscript's central March 2027
 estimate from real data, then runs the Reviewer-2 bias-sensitivity
 analysis with BOTH uncertainty sources included (walk-forward model
-residuals AND the ENSO multi-model dispersion bounds), instead of the
-residuals-only approximation used in the first pass.
+residuals AND the ENSO multi-model dispersion bounds).
 
 What this does, step by step:
   1. Loads ERA5/C3S GMST and Nino3.4 (ERA5) from data/.
@@ -26,7 +27,7 @@ Usage
 -----
     python run_bias_sensitivity_real.py \\
         --gmst data/era5_gmst_c3s.csv \\
-        --enso data/nino34_real.csv \\
+        --enso data/nino34_anomaly.csv \\
         --enso-members data/enso_members_oni.csv
 """
 
