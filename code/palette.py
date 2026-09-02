@@ -1,5 +1,8 @@
 """
+Author: Baptiste Boussemart
+
 palette.py
+
 Centralized colour-blind-safe palette for all TESR figures, aligned with
 how ECMWF/Copernicus (C3S) present GMST anomalies and probabilistic
 spread: a diverging blue-to-red scale for anomaly magnitude, a
@@ -12,32 +15,6 @@ Okabe & Ito (2008) is the standard reference for palettes that remain
 distinguishable under protanopia, deuteranopia and tritanopia. See also
 Crameri et al. (2020, Nat. Commun.) "The misuse of colour in science
 communication".
-
-REVISION NOTE (this version -- fixes the "jaune orangé illisible"
-issue): the previous version rendered nested quantile bands (Q0-Q100,
-Q5-Q95, Q25-Q75; the 5-95%/25-75% fan-chart bands; the forecast
-uncertainty envelopes) by taking a SINGLE orange hue (HIGHLIGHT) and
-stacking it at different alpha values. Same-hue alpha stacking is not
-a real graded scale: once alpha exceeds roughly 0.3, the layers wash
-out into a near-uniform pale yellow, so the individual bands become
-indistinguishable from one another -- exactly the complaint. It also
-collided with HIGHLIGHT itself, which is used elsewhere in the same
-figures for annotation callouts, and with the ENSO_SCALE ladder, which
-used four consecutive warm tints (yellow/orange/vermillion/dark
-vermillion) that were nearly identical as thin threshold lines.
-
-Fix: nested bands now use QUANTILE_BANDS, a genuine 3-step
-hue+lightness-separated sequential ramp in the blue family (pale ->
-medium -> saturated blue), matching the blue "ensemble spread"
-convention used in Copernicus/ECMWF plots, and kept clear of
-FACTUAL/HIGHLIGHT so central lines and callouts always stand out
-against it. ENSO_SCALE was rebuilt as a true diverging cool -> warm
-ladder (blue -> yellow -> orange -> vermillion -> near-black) so each
-step differs in both hue and lightness. HIGHLIGHT is now reserved for
-sparse annotations/callouts only, never for stacked bands. WARM_LIGHT
-was previously a straight duplicate of HIGHLIGHT (same hex) and is
-now a distinct muted gold, so the two 1.5C/2C threshold shadings in
-plot_probability_distribution are actually two different colours.
 
 Roles used throughout the codebase:
     FACTUAL       -- observed / model-fitted series (ENSO-influenced world)
@@ -112,7 +89,7 @@ def light_tint(hex_color, alpha=0.20):
     bands -- that collapses into a near-uniform wash (this was the bug).
     Use QUANTILE_BANDS / quantile_band_color() for nested bands instead.
 
-    GOTCHA: never pass the result of this function as `facecolor` in a
+    WARNING: never pass the result of this function as `facecolor` in a
     dict/Patch that ALSO sets its own `alpha=` keyword (e.g.
     `bbox=dict(facecolor=light_tint(X, 0.08), alpha=0.9)`). A Patch-level
     `alpha` overrides the alpha channel embedded in any RGBA colour it
