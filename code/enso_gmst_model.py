@@ -1,11 +1,11 @@
 """
-enso_gmst_model.py (v3 -- non-linear model)
+enso_gmst_model.py (non-linear model)
 Monthly forecasting model for the global mean surface temperature
 anomaly from the ENSO signal (Nino 3.4 SSTA, 1991-2020 base) and a
 background trend, expressed as a preindustrial anomaly (consistent
 with ERA5 / C3S).
 
-Model (v3, non-linear):
+Model:
     GMST_anom(t) = a + b*t + c*t^2 + d*ENSO(t-lag) + e*[ENSO(t-lag)*t] + resid(t)
 
 - t, t^2: quadratic trend -> captures the recent acceleration of
@@ -38,6 +38,7 @@ from sklearn.linear_model import LinearRegression, Ridge, RidgeCV
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error
 import matplotlib.pyplot as plt
+import matplotlib.transforms
 import matplotlib.patheffects as pe
 
 from palette import (
@@ -49,21 +50,21 @@ from palette import (
     overview_band_color,
 )
 
-# fit_ridge_standardized() ajuste volontairement sur des tableaux numpy nus
-# (sans noms de colonnes) pour la standardisation ; les appels ultérieurs à
-# .predict() sur des DataFrame déclenchent alors un avertissement sklearn
-# purement cosmétique (aucun effet sur le résultat) -- on le masque ici.
+# fit_ridge_standardized() deliberately fits on bare numpy arrays
+# (without column names) for standardization; subsequent calls to
+# .predict() on a DataFrame then trigger a purely cosmetic sklearn
+# warning (no effect on the result) -- it is suppressed here.
 warnings.filterwarnings("ignore", message="X has feature names, but .* was fitted without feature names")
 
 # ----------------------------------------------------------------------
-# 1. CHARGEMENT DES DONNÉES
+# 1. DATA LOADING
 # ----------------------------------------------------------------------
 
 def load_era5_gmst_c3s(path_csv):
     """
-    Charge un fichier bulletin C3S (ex : C3S_Bulletin_temp_*_DATA.csv).
-    Ce format contient déjà l'anomalie préindustrielle calculée
-    (colonne 'ano_pi'), donc aucun offset à appliquer manuellement.
+    Loads a C3S bulletin file (e.g. C3S_Bulletin_temp_*_DATA.csv).
+    This format already contains the computed preindustrial anomaly
+    (column 'ano_pi'), so no offset needs to be applied manually.
     """
     df = pd.read_csv(path_csv, comment='#')
     df['month'] = pd.to_datetime(df['month'])
@@ -75,9 +76,9 @@ def load_era5_gmst_c3s(path_csv):
 
 def load_era5_gmst(path_csv, base_offset_preindustrial=0.88):
     """
-    Variante générique : charge un CSV ['date', 'gmst_anom_9120'] et
-    applique un offset préindustriel fixe (moins précis que la fonction
-    ci-dessus, à utiliser seulement si tu n'as pas le format C3S).
+    Generic variant: loads a CSV ['date', 'gmst_anom_9120'] and
+    applies a fixed preindustrial offset (less precise than the
+    function above, use only if you don't have the C3S format).
     """
     df = pd.read_csv(path_csv, parse_dates=['date'])
     df = df.set_index('date').sort_index()
@@ -87,8 +88,8 @@ def load_era5_gmst(path_csv, base_offset_preindustrial=0.88):
 
 def load_enso(path_csv):
     """
-    Charge l'indice ENSO (ex : Niño3.4 SSTA, base 1991-2020).
-    Format attendu : colonnes ['date', 'enso_ssta']
+    Loads the ENSO index (e.g. Nino3.4 SSTA, 1991-2020 base).
+    Expected format: columns ['date', 'enso_ssta']
     """
     df = pd.read_csv(path_csv, parse_dates=['date'])
     df = df.set_index('date').sort_index()
@@ -97,10 +98,10 @@ def load_enso(path_csv):
 
 def load_enso_climatereanalyzer(path_csv):
     """
-    Charge un export Climate Reanalyzer (ClimateReanalyzer.org), ex :
+    Loads a Climate Reanalyzer export (ClimateReanalyzer.org), e.g.
     'era5-0p5deg_nino-3_4_sst_surface_anom_1991-2020.csv'.
-    Format : en-tête texte de plusieurs lignes puis colonnes 'time,sst'
-    avec time au format YYYYMM.
+    Format: multi-line text header followed by columns 'time,sst'
+    with time in YYYYMM format.
     """
     with open(path_csv, encoding='utf-8') as f:
         lines = f.readlines()
@@ -114,12 +115,11 @@ def load_enso_climatereanalyzer(path_csv):
 
 def _weighted_quantile(values, weights, quantiles):
     """
-    Quantile empirique pondéré (interpolation linéaire sur la fonction de
-    répartition cumulée pondérée). Utilisé pour donner un poids égal à
-    chaque MODÈLE (indépendamment de la taille de son ensemble de
-    membres), conformément à la méthodologie du Climate Dashboard
-    (Hausfath et al., "each model weighted equally regardless of
-    ensemble size").
+    Weighted empirical quantile (linear interpolation on the weighted
+    cumulative distribution function). Used to give equal weight to
+    each MODEL (independent of its ensemble member count), consistent
+    with the Climate Dashboard methodology (Hausfath et al., "each
+    model weighted equally regardless of ensemble size").
     """
     values = np.asarray(values, dtype=float)
     weights = np.asarray(weights, dtype=float)
@@ -132,25 +132,25 @@ def _weighted_quantile(values, weights, quantiles):
 
 def load_enso_dashboard_scenario(path_members, exclude_models=('SINTEX-F',)):
     """
-    Reconstruit, à partir du fichier membre-par-membre du Climate
-    Dashboard (enso_members_oni.csv, indice ONI/Niño 3.4), une enveloppe
-    de scénario mensuelle EXCLUANT explicitement les modèles listés dans
-    `exclude_models` (par défaut SINTEX-F, dont le biais froid marqué
-    tire la borne basse et le percentile p05 vers des valeurs non
-    représentatives des autres modèles -- cf. écarts observés modèle par
-    modèle dans enso_members_oni.csv).
+    Reconstructs, from the Climate Dashboard's member-by-member file
+    (enso_members_oni.csv, ONI/Nino 3.4 index), a monthly scenario
+    envelope explicitly EXCLUDING the models listed in
+    `exclude_models` (SINTEX-F by default, whose marked cold bias
+    pulls the lower bound and the p05 percentile toward values that
+    are not representative of the other models -- cf. model-by-model
+    deviations observed in enso_members_oni.csv).
 
-    Les percentiles (p05/p25/mediane/p75/p95) sont calculés en pondérant
-    chaque MODÈLE également (et non chaque membre également), pour ne
-    pas laisser un modèle à gros ensemble (ex. JMA, ~155 membres/mois)
-    dominer un modèle à petit ensemble (ex. NASA-GEOS-S2S-2, 10 membres).
-    Les bornes extrêmes (q0/q100) restent le min/max brut du pool de
-    membres restant après exclusion -- c'est la définition la plus
-    directe d'un "Q0-Q100" une fois l'outlier retiré.
+    The percentiles (p05/p25/median/p75/p95) are computed by weighting
+    each MODEL equally (not each member equally), so that a model with
+    a large ensemble (e.g. JMA, ~155 members/month) does not dominate
+    a model with a small ensemble (e.g. NASA-GEOS-S2S-2, 10 members).
+    The extreme bounds (q0/q100) remain the raw min/max of the member
+    pool remaining after exclusion -- the most direct definition of a
+    "Q0-Q100" once the outlier has been removed.
 
-    Retour
-    ------
-    DataFrame indexé par mois (Timestamp, jour=1), colonnes :
+    Returns
+    -------
+    DataFrame indexed by month (Timestamp, day=1), columns:
     ['median', 'p05', 'p25', 'p75', 'p95', 'q0', 'q100', 'n_models', 'n_members'].
     """
     members = pd.read_csv(path_members, comment='#')
@@ -174,10 +174,10 @@ def load_enso_dashboard_scenario(path_members, exclude_models=('SINTEX-F',)):
 
 def load_enso_dashboard_members(path_members, target_month, exclude_models=('SINTEX-F',)):
     """
-    Retourne les membres bruts (valeur ONI + poids modèle-égal normalisé
-    à somme 1) pour un seul mois cible (ex. '2026-11'), pour construire
-    une distribution empirique (histogramme) -- typiquement le mois de
-    paroxysme du scénario.
+    Returns the raw members (ONI value + equal-model weight normalized
+    to sum to 1) for a single target month (e.g. '2026-11'), to build
+    an empirical distribution (histogram) -- typically the scenario's
+    peak month.
     """
     members = pd.read_csv(path_members, comment='#')
     sub = members[(members['target_month'] == target_month)
@@ -188,7 +188,7 @@ def load_enso_dashboard_members(path_members, target_month, exclude_models=('SIN
 
 
 # ----------------------------------------------------------------------
-# 2. RECHERCHE DU LAG OPTIMAL ENSO -> GMST
+# 2. SEARCH FOR THE OPTIMAL ENSO -> GMST LAG
 # ----------------------------------------------------------------------
 
 def smooth_enso(enso_df, window=3):
@@ -379,7 +379,7 @@ def select_ridge_alpha_loo(X, y, alphas):
     for alpha in alphas:
         A_inv = np.linalg.inv(XtX + alpha * identity)
         H = Xc @ A_inv @ Xc.T
-        h_diag = np.clip(np.diag(H), None, 1 - 1e-10)  # évite une division par ~0
+        h_diag = np.clip(np.diag(H), None, 1 - 1e-10)  # avoids a division by ~0
         resid = yc - H @ yc
         loo_resid = resid / (1 - h_diag)
         mse_loo = float(np.mean(loo_resid ** 2))
@@ -473,15 +473,15 @@ def fit_model(df, use_seasonal=True, regularize=True, test_size=0.2):
 
         best_alpha, best_mse_loo, _ = select_ridge_alpha_loo(X_train_std, y_train.values,
                                                               alphas=np.logspace(-3, 3, 50))
-        model = fit_ridge_standardized(X_train.values, y_train.values, best_alpha)  # fit déjà fait en interne
+        model = fit_ridge_standardized(X_train.values, y_train.values, best_alpha)  # fit already done internally
     else:
         model = LinearRegression()
         model.fit(X_train, y_train)
 
-    print(f"Coefficients : {dict(zip(X.columns, model.coef_))}")
-    print(f"Intercept : {model.intercept_:.3f}")
+    print(f"Coefficients: {dict(zip(X.columns, model.coef_))}")
+    print(f"Intercept: {model.intercept_:.3f}")
     if regularize:
-        model.alpha_ = best_alpha  # pour compatibilité avec le reste du script (walk-forward, etc.)
+        model.alpha_ = best_alpha  # for compatibility with the rest of the script (walk-forward, etc.)
         print(f"Selected ridge alpha (LOO-CV, reproducible manual computation, standardised features): "
               f"{model.alpha_:.4g} (MSE-LOO = {best_mse_loo:.5f})")
 
@@ -489,7 +489,7 @@ def fit_model(df, use_seasonal=True, regularize=True, test_size=0.2):
 
 
 # ----------------------------------------------------------------------
-# 4. ÉVALUATION : R, R², RMSE
+# 4. EVALUATION: R, R2, RMSE
 # ----------------------------------------------------------------------
 
 def evaluate_model(model, X, y_obs, label="test"):
@@ -506,16 +506,16 @@ def plot_model_vs_obs(df, model, X, y_obs,
                        title=None,
                        subtitle=None):
     """
-    Confrontation modèle vs observations : série temporelle + nuage de
-    points, habillage identique aux autres graphiques du script
-    (typographie serif, crédits, seuils, palette de couleur cohérente).
+    Model vs observations comparison: time series + scatter plot,
+    styled identically to the other charts in the script (serif
+    typography, credits, thresholds, consistent color palette).
     """
-    y_pred, r, r2, rmse = evaluate_model(model, X, y_obs, label="ensemble complet")
-    # -- Titre/sous-titre : REFORMULÉS -- l'ancien titre ("Model vs
-    #    observations (ERA5)") ne disait rien de la période couverte ni de
-    #    la performance du modèle ; construits ici dynamiquement (la
-    #    période réelle de `df`, R² et RMSE déjà calculés ci-dessus) pour
-    #    qu'ils portent l'information utile à un lecteur de preprint. --
+    y_pred, r, r2, rmse = evaluate_model(model, X, y_obs, label="full set")
+    # -- Title/subtitle: REWORDED -- the old title ("Model vs
+    #    observations (ERA5)") said nothing about the period covered or
+    #    the model's performance; built here dynamically (the actual
+    #    period of `df`, R² and RMSE already computed above) so that
+    #    they carry information useful to a preprint reader. --
     year_deb, year_fin = df.index[0].year, df.index[-1].year
     title = title or (f"Comparison of TESR-modelled and ERA5-observed global mean "
                        f"surface temperature anomalies, {year_deb}-{year_fin}")
@@ -525,7 +525,7 @@ def plot_model_vs_obs(df, model, X, y_obs,
     plt.rcParams['font.family'] = 'serif'
     fig, axes = plt.subplots(1, 2, figsize=(14, 6), gridspec_kw={'width_ratios': [1.6, 1]})
 
-    # -- Panneau 1 : série temporelle --
+    # -- Panel 1: time series --
     ax0 = axes[0]
     ax0.plot(df.index, y_obs, color='#1a1a1a', lw=1.1, label='Observed (ERA5, ref. 1850-1900)')
     ax0.plot(df.index, y_pred, color=FACTUAL, lw=1.1, alpha=0.85, label='Fitted model')
@@ -537,7 +537,7 @@ def plot_model_vs_obs(df, model, X, y_obs,
         ax0.spines[spine].set_visible(False)
     ax0.legend(loc='upper left', frameon=True, framealpha=0.9, fontsize=8.5)
 
-    # -- Panneau 2 : nuage de points modèle vs obs --
+    # -- Panel 2: model vs obs scatter plot --
     ax1 = axes[1]
     ax1.scatter(y_obs, y_pred, s=14, alpha=0.35, color=COUNTERFACT_2, edgecolor='none')
     lims = [min(y_obs.min(), y_pred.min()) - 0.05, max(y_obs.max(), y_pred.max()) + 0.05]
@@ -570,52 +570,55 @@ def plot_model_vs_obs(df, model, X, y_obs,
 
 
 # ----------------------------------------------------------------------
-# 5. PROJECTION MANUELLE (saisie libre des valeurs ENSO)
+# 5. MANUAL PROJECTION (free-form ENSO value input)
 # ----------------------------------------------------------------------
 
 def forecast_manual(model, feature_cols, df, enso_values, start_date=None):
     """
-    Projection mois par mois à partir de valeurs ENSO saisies manuellement.
+    Month-by-month projection from manually entered ENSO values.
 
-    ATTENTION AU LAG (piège fréquent) :
-    -----------------------------------
-    enso_values[i] est utilisé TEL QUEL comme feature 'enso_lag' pour la
-    date (start_date + i mois). Cette fonction n'applique AUCUN décalage
-    automatique. Or le modèle a été entraîné avec 'enso_lag'(t) = ENSO
-    réel observé à (t - lag) [cf. build_dataset()]. Donc enso_values[i]
-    DOIT DÉJÀ être la valeur ENSO correspondant au mois (start_date+i-lag),
-    et non la prévision ENSO du mois (start_date+i) lui-même.
-    Exemple concret avec lag=4 : pour prédire le GMST de novembre 2026,
-    il faut mettre en position correspondante la valeur ENSO de juillet
-    2026 (novembre - 4 mois) -- pas la prévision ENSO de novembre.
-    Se tromper ici décale tout le signal de `lag` mois et double
-    grossièrement l'erreur (RMSE) sur un cas testé en interne.
-    -> Si tu pars d'une série ENSO indexée par sa PROPRE date calendaire
-    (ex. prévisions saisonnières C3S/CFSv2 mois par mois), utilise plutôt
-    forecast_from_enso_calendar() ci-dessous, qui fait le décalage pour toi.
+    WATCH OUT FOR THE LAG (common trap):
+    -------------------------------------
+    enso_values[i] is used AS-IS as the 'enso_lag' feature for the
+    date (start_date + i months). This function applies NO automatic
+    shift. But the model was trained with 'enso_lag'(t) = real ENSO
+    observed at (t - lag) [see build_dataset()]. So enso_values[i]
+    MUST ALREADY be the ENSO value corresponding to the month
+    (start_date+i-lag), not the ENSO forecast for month (start_date+i)
+    itself.
+    Concrete example with lag=4: to predict GMST for November 2026,
+    the value placed at the corresponding position must be the ENSO
+    value for July 2026 (November - 4 months) -- not November's ENSO
+    forecast.
+    Getting this wrong shifts the whole signal by `lag` months and
+    roughly doubles the error (RMSE) in a case tested internally.
+    -> If you start from an ENSO series indexed by its OWN calendar
+    date (e.g. C3S/CFSv2 seasonal forecasts month by month), use
+    forecast_from_enso_calendar() below instead, which does the shift
+    for you.
 
-    Paramètres
+    Parameters
     ----------
-    enso_values : liste de floats, une valeur d'anomalie ENSO déjà décalée
-                  du lag, une par mois cible
-                  (ex : [0.4, 0.2, 0.0, -0.2, -0.4, -0.5])
-    start_date  : date de départ de la projection (par défaut : le mois
-                  suivant la dernière donnée du dataset). Permet aussi de
-                  faire un backtest sur une période passée en choisissant
-                  une date antérieure.
+    enso_values : list of floats, an ENSO anomaly value already shifted
+                  by the lag, one per target month
+                  (e.g.: [0.4, 0.2, 0.0, -0.2, -0.4, -0.5])
+    start_date  : start date of the projection (default: the month
+                  following the dataset's last data point). Also
+                  allows backtesting over a past period by choosing
+                  an earlier date.
 
-    Retour
-    ------
-    DataFrame indexé par date avec la colonne 'gmst_anom_pred_preind'
+    Returns
+    -------
+    DataFrame indexed by date with the column 'gmst_anom_pred_preind'
     """
     if start_date is None:
         start_date = df.index[-1] + pd.DateOffset(months=1)
         last_t = df['t_index'].iloc[-1]
     else:
         start_date = pd.to_datetime(start_date)
-        # décalage en mois entre la DERNIÈRE date du dataset et start_date
-        # (permet aussi bien une projection future qu'un backtest sur une
-        # date antérieure, en restant cohérent avec l'axe t_index du fit)
+        # offset in months between the dataset's LAST date and start_date
+        # (allows both a future projection and a backtest over an
+        # earlier date, while staying consistent with the fit's t_index axis)
         months_offset = (start_date.year - df.index[-1].year) * 12 + (start_date.month - df.index[-1].month)
         last_t = df['t_index'].iloc[-1] + months_offset - 1
 
@@ -644,30 +647,30 @@ def forecast_manual(model, feature_cols, df, enso_values, start_date=None):
 
 def forecast_from_enso_calendar(model, feature_cols, df, lag, enso_calendar):
     """
-    Variante sûre de forecast_manual() : tu donnes les valeurs ENSO indexées
-    par LEUR PROPRE date calendaire (ex. prévision Niño3.4 de C3S/CFSv2
-    mois par mois), et cette fonction applique elle-même le décalage de
-    `lag` mois pour construire la bonne feature 'enso_lag' à la bonne date
-    cible de GMST. Ça évite le piège documenté dans forecast_manual().
+    Safe variant of forecast_manual(): you give the ENSO values indexed
+    by THEIR OWN calendar date (e.g. C3S/CFSv2 Nino3.4 forecast month
+    by month), and this function itself applies the `lag`-month shift
+    to build the correct 'enso_lag' feature at the correct target GMST
+    date. This avoids the trap documented in forecast_manual().
 
-    Paramètres
+    Parameters
     ----------
-    lag : le lag (en mois) utilisé pour fit_model / build_dataset — donc
-          celui retourné par find_optimal_lag() sur les vraies données.
-    enso_calendar : dict ou pd.Series {date_calendaire: valeur_enso}.
-          La date de chaque valeur est la date à laquelle cet ENSO est
-          observé/prévu (pas la date du GMST cible).
+    lag : the lag (in months) used for fit_model / build_dataset -- so
+          the one returned by find_optimal_lag() on the real data.
+    enso_calendar : dict or pd.Series {calendar_date: enso_value}.
+          Each value's date is the date at which that ENSO value is
+          observed/forecast (not the target GMST date).
 
-    Logique
+    Logic
+    -----
+    An ENSO value dated M serves to predict GMST for month (M + lag).
+    So if enso_calendar covers [M0 .. M0+k], the predicted GMST values
+    cover [M0+lag .. M0+k+lag].
+
+    Returns
     -------
-    Une valeur ENSO datée M sert à prédire le GMST du mois (M + lag).
-    Donc si enso_calendar couvre [M0 .. M0+k], les GMST prédits couvrent
-    [M0+lag .. M0+k+lag].
-
-    Retour
-    ------
-    DataFrame indexé par date (mois cible du GMST, déjà décalés de +lag)
-    avec la colonne 'gmst_anom_pred_preind'.
+    DataFrame indexed by date (target GMST month, already shifted by
+    +lag) with the column 'gmst_anom_pred_preind'.
     """
     if isinstance(enso_calendar, dict):
         enso_calendar = pd.Series(enso_calendar)
@@ -679,43 +682,44 @@ def forecast_from_enso_calendar(model, feature_cols, df, lag, enso_calendar):
 
     forecast_df = forecast_manual(model, feature_cols, df, enso_values_aligned,
                                    start_date=target_dates[0])
-    # sécurité : vérifie que les dates cibles calculées correspondent bien
+    # safety check: verify that the computed target dates match
     assert list(forecast_df.index) == list(target_dates), \
-        "Incohérence de dates dans le décalage du lag -- vérifier les entrées."
+        "Date inconsistency in the lag shift -- check the inputs."
     return forecast_df
 
 
 def decompose_forecast_enso_calendar(model, feature_cols, df, lag, enso_calendar):
     """
-    Décomposition ADDITIVE et EXACTE de la prévision GMSTA en trois
-    composantes (le modèle étant une régression linéaire -- Ridge --, la
-    somme des trois est rigoureusement égale à la prédiction du modèle,
-    sans approximation) :
+    ADDITIVE and EXACT decomposition of the GMSTA forecast into three
+    components (since the model is a linear regression -- Ridge --, the
+    sum of the three is rigorously equal to the model's prediction,
+    with no approximation):
 
-      - trend    : contribution de la tendance temporelle (intercept +
-                   β_t·t + β_t²·t²), i.e. la trajectoire que prédirait le
-                   modèle hors de toute variabilité ENSO ou saisonnière ;
-      - enso     : contribution du terme ENSO, incluant son interaction
-                   avec le temps (β_enso·ENSO_lissé(t−τ) +
-                   β_int·[ENSO_lissé(t−τ)·t]) -- c'est la grandeur
-                   d'intérêt pour l'attribution ;
-      - seasonal : contribution du cycle saisonnier résiduel (indicatrice
-                   du mois).
+      - trend    : contribution of the time trend (intercept +
+                   beta_t*t + beta_t2*t^2), i.e. the trajectory the
+                   model would predict absent any ENSO or seasonal
+                   variability;
+      - enso     : contribution of the ENSO term, including its
+                   interaction with time (beta_enso*ENSO_smoothed(t-tau) +
+                   beta_int*[ENSO_smoothed(t-tau)*t]) -- the quantity
+                   of interest for attribution;
+      - seasonal : contribution of the residual seasonal cycle (month
+                   indicator).
 
-    Équivaut à un calcul contrefactuel "ENSO neutre" (enso=0 partout) :
-    total(t) - trend(t) - seasonal(t) = enso(t) par construction linéaire ;
-    et total(t) évalué avec un enso_calendar à zéro redonnerait exactement
-    trend(t) + seasonal(t). Les deux approches sont utilisées en parallèle
-    dans le script (cette fonction pour la décomposition terme-à-terme,
-    et un appel séparé à forecast_from_enso_calendar avec enso=0 pour la
-    courbe contrefactuelle illustrative), à des fins de verification
-    croisée.
+    Equivalent to an "ENSO-neutral" counterfactual computation (enso=0
+    everywhere): total(t) - trend(t) - seasonal(t) = enso(t) by linear
+    construction; and total(t) evaluated with an enso_calendar of zero
+    would give back exactly trend(t) + seasonal(t). Both approaches are
+    used in parallel in the script (this function for the term-by-term
+    decomposition, and a separate call to forecast_from_enso_calendar
+    with enso=0 for the illustrative counterfactual curve), for
+    cross-verification purposes.
 
-    Retour
-    ------
-    DataFrame indexé par date cible (mois GMST, décalé de +lag) avec les
-    colonnes 'trend', 'enso', 'seasonal', 'total' (= somme des trois,
-    identique à la sortie de forecast_from_enso_calendar).
+    Returns
+    -------
+    DataFrame indexed by target date (GMST month, shifted by +lag) with
+    the columns 'trend', 'enso', 'seasonal', 'total' (= sum of the
+    three, identical to the output of forecast_from_enso_calendar).
     """
     if isinstance(enso_calendar, dict):
         enso_calendar = pd.Series(enso_calendar)
@@ -735,7 +739,7 @@ def decompose_forecast_enso_calendar(model, feature_cols, df, lag, enso_calendar
 
         trend = intercept + coefs.get('t_index', 0.0) * t_index + coefs.get('t_index2', 0.0) * t_index ** 2
         enso_contrib = coefs.get('enso_lag', 0.0) * enso_val + coefs.get('enso_x_t', 0.0) * (enso_val * t_index)
-        seasonal = coefs.get(f"m_{target_date.month}", 0.0)  # 0 pour janvier (mois de référence)
+        seasonal = coefs.get(f"m_{target_date.month}", 0.0)  # 0 for January (reference month)
         total = trend + enso_contrib + seasonal
         rows.append({'date': target_date, 'trend': trend, 'enso': enso_contrib,
                       'seasonal': seasonal, 'total': total})
@@ -746,29 +750,28 @@ def decompose_forecast_enso_calendar(model, feature_cols, df, lag, enso_calendar
 def compare_historical_episodes(model, feature_cols, df, lag, enso_df, episodes,
                                  current_decomp=None, current_label=None):
     """
-    Applique la MÊME décomposition d'attribution (trend/ENSO/saisonnier,
-    modèle opérationnel unique) à plusieurs épisodes El Niño passés, pour
-    comparer la part relative de la tendance ("anthropique") et de l'ENSO
-    ("naturel") entre épisodes -- et avec le scénario en cours.
+    Applies the SAME attribution decomposition (trend/ENSO/seasonal,
+    single operational model) to several past El Nino episodes, to
+    compare the relative share of the trend ("anthropogenic") and of
+    ENSO ("natural") between episodes -- and with the ongoing scenario.
 
-    IMPORTANT (à assumer explicitement dans le texte) : ceci est une
-    attribution EX POST, avec le modèle entraîné sur l'ensemble des
-    données disponibles aujourd'hui (jusqu'en 2026), appliqué
-    rétrospectivement à des épisodes passés -- PAS une simulation de ce
-    que le modèle aurait prédit en temps réel à l'époque (ce qui serait
-    un exercice de validation de compétence, distinct, cf. §3.1). L'un
-    répond à "avec notre compréhension actuelle de la relation
-    tendance/ENSO, comment se répartit la chaleur observed lors de cet
-    épisode ?", l'autre à "le modèle aurait-il pu l'anticiper à
-    l'époque ?" -- deux questions différentes.
+    IMPORTANT (to state explicitly in the text): this is an EX POST
+    attribution, with the model trained on the full set of data
+    available today (through 2026), applied retrospectively to past
+    episodes -- NOT a simulation of what the model would have
+    predicted in real time back then (which would be a separate skill-
+    validation exercise, see section 3.1). One answers "with our
+    current understanding of the trend/ENSO relationship, how is the
+    heat observed during this episode split?", the other "could the
+    model have anticipated it at the time?" -- two different questions.
 
-    episodes : dict {label: année_de_juillet_de_départ}, ex.
+    episodes : dict {label: starting_july_year}, e.g.
                {"1982-1983": 1982, "1997-1998": 1997, "2015-2016": 2015}
-               La fenêtre couverte est juillet(année) -> juin(année+1),
-               identique à celle utilisée pour le scénario 2026-2027.
+               The window covered is July(year) -> June(year+1),
+               identical to the one used for the 2026-2027 scenario.
 
-    Retour : DataFrame indexé par label d'épisode, une ligne par épisode
-    (moyenne et pic sur la fenêtre), + le scénario actuel si fourni.
+    Returns: DataFrame indexed by episode label, one row per episode
+    (mean and peak over the window), + the current scenario if given.
     """
     rows = []
     for label, start_year in episodes.items():
@@ -776,33 +779,33 @@ def compare_historical_episodes(model, feature_cols, df, lag, enso_df, episodes,
         input_end = pd.Timestamp(f"{start_year + 1}-03-01")
         calendar = enso_df['enso_ssta'].loc[input_start:input_end]
         if len(calendar) < 12:
-            print(f"[compare_historical_episodes] {label} : données incomplètes "
-                  f"({len(calendar)}/12 mois), épisode ignoré.")
+            print(f"[compare_historical_episodes] {label}: incomplete data "
+                  f"({len(calendar)}/12 months), episode skipped.")
             continue
         d = decompose_forecast_enso_calendar(model, feature_cols, df, lag, calendar)
-        pic = d['total'].idxmax()
+        peak = d['total'].idxmax()
         rows.append({
             'episode': label,
-            'total_moy': d['total'].mean(), 'total_pic': d.loc[pic, 'total'],
-            'trend_moy': d['trend'].mean(), 'trend_pic': d.loc[pic, 'trend'],
-            'enso_moy': d['enso'].mean(), 'enso_pic': d.loc[pic, 'enso'],
-            'saisonnier_moy': d['seasonal'].mean(),
-            'enso_pct_moy': 100 * d['enso'].mean() / d['total'].mean(),
-            'enso_pct_pic': 100 * d.loc[pic, 'enso'] / d.loc[pic, 'total'],
-            'mois_pic': pic,
+            'total_mean': d['total'].mean(), 'total_peak': d.loc[peak, 'total'],
+            'trend_mean': d['trend'].mean(), 'trend_peak': d.loc[peak, 'trend'],
+            'enso_mean': d['enso'].mean(), 'enso_peak': d.loc[peak, 'enso'],
+            'seasonal_mean': d['seasonal'].mean(),
+            'enso_pct_mean': 100 * d['enso'].mean() / d['total'].mean(),
+            'enso_pct_peak': 100 * d.loc[peak, 'enso'] / d.loc[peak, 'total'],
+            'peak_month': peak,
         })
 
     if current_decomp is not None:
-        pic = current_decomp['total'].idxmax()
+        peak = current_decomp['total'].idxmax()
         rows.append({
             'episode': current_label or "Ongoing scenario",
-            'total_moy': current_decomp['total'].mean(), 'total_pic': current_decomp.loc[pic, 'total'],
-            'trend_moy': current_decomp['trend'].mean(), 'trend_pic': current_decomp.loc[pic, 'trend'],
-            'enso_moy': current_decomp['enso'].mean(), 'enso_pic': current_decomp.loc[pic, 'enso'],
-            'saisonnier_moy': current_decomp['seasonal'].mean(),
-            'enso_pct_moy': 100 * current_decomp['enso'].mean() / current_decomp['total'].mean(),
-            'enso_pct_pic': 100 * current_decomp.loc[pic, 'enso'] / current_decomp.loc[pic, 'total'],
-            'mois_pic': pic,
+            'total_mean': current_decomp['total'].mean(), 'total_peak': current_decomp.loc[peak, 'total'],
+            'trend_mean': current_decomp['trend'].mean(), 'trend_peak': current_decomp.loc[peak, 'trend'],
+            'enso_mean': current_decomp['enso'].mean(), 'enso_peak': current_decomp.loc[peak, 'enso'],
+            'seasonal_mean': current_decomp['seasonal'].mean(),
+            'enso_pct_mean': 100 * current_decomp['enso'].mean() / current_decomp['total'].mean(),
+            'enso_pct_peak': 100 * current_decomp.loc[peak, 'enso'] / current_decomp.loc[peak, 'total'],
+            'peak_month': peak,
         })
 
     return pd.DataFrame(rows).set_index('episode')
@@ -811,32 +814,32 @@ def compare_historical_episodes(model, feature_cols, df, lag, enso_df, episodes,
 def bootstrap_attribution_uncertainty(model, feature_cols, X_train, y_train, df, lag,
                                        enso_calendar, n_boot=1000, block_size=12, seed=42):
     """
-    Incertitude autour de la décomposition d'attribution (trend/ENSO/saisonnier)
-    par bootstrap par BLOCS MOBILES des résidus d'entraînement (Künsch, 1989),
-    plus adapté qu'un bootstrap i.i.d. classique à des résidus mensuels
-    autocorrélés (persistance ENSO/climatique d'un mois à l'autre).
+    Uncertainty around the attribution decomposition (trend/ENSO/seasonal)
+    via MOVING-BLOCK bootstrap of the training residuals (Kunsch, 1989),
+    better suited than a classic i.i.d. bootstrap to autocorrelated
+    monthly residuals (month-to-month ENSO/climate persistence).
 
-    Principe (bootstrap résiduel, X fixé) :
-      1. résidus = y_train - modèle.predict(X_train)  [résidus du modèle déjà
-         entraîné, à alpha fixe -- cf. Reproductibilité]
-      2. à chaque réplique : ré-échantillonnage des résidus par blocs de
-         `block_size` mois consécutifs (préserve l'autocorrélation locale),
-         nouvelle série y* = ŷ_train + résidus_rééchantillonnés
-      3. ré-ajustement d'un Ridge à alpha FIXE (celui déjà sélectionné,
-         model.alpha_ -- pas de nouvelle recherche RidgeCV, pour les mêmes
-         raisons de reproductibilité qu'en walk-forward) sur (X_train, y*)
-      4. décomposition trend/ENSO/saisonnier recalculée avec les nouveaux
-         coefficients, pour le même scénario ENSO en entrée
+    Principle (residual bootstrap, X fixed):
+      1. residuals = y_train - model.predict(X_train)  [residuals of the
+         already-trained model, at fixed alpha -- see Reproducibility]
+      2. for each replicate: resample the residuals in blocks of
+         `block_size` consecutive months (preserves local
+         autocorrelation), new series y* = y_hat_train + resampled_residuals
+      3. re-fit a Ridge at FIXED alpha (the one already selected,
+         model.alpha_ -- no new RidgeCV search, for the same
+         reproducibility reasons as in walk-forward) on (X_train, y*)
+      4. trend/ENSO/seasonal decomposition recomputed with the new
+         coefficients, for the same input ENSO scenario
 
-    Le seed est fixé (défaut 42) : reproductible sur toute machine, malgré
-    la composante aléatoire introduite ici (contrairement au reste du
-    pipeline, volontairement déterministe -- cf. note en README/Méthodes).
+    The seed is fixed (default 42): reproducible on any machine, despite
+    the random component introduced here (unlike the rest of the
+    pipeline, deliberately deterministic -- see the README/Methods note).
 
-    Retour
-    ------
-    DataFrame indexé par date cible, colonnes :
-      enso_p5, enso_p50, enso_p95           (°C, contribution ENSO)
-      enso_pct_p5, enso_pct_p50, enso_pct_p95   (%, part de ENSO dans total)
+    Returns
+    -------
+    DataFrame indexed by target date, columns:
+      enso_p5, enso_p50, enso_p95           (C, ENSO contribution)
+      enso_pct_p5, enso_pct_p50, enso_pct_p95   (%, ENSO share of total)
     """
     rng = np.random.default_rng(seed)
     n = len(X_train)
@@ -876,34 +879,32 @@ def bootstrap_attribution_uncertainty(model, feature_cols, X_train, y_train, df,
 
 def _combined_uncertainty_samples(central, residuals, bounds=None, n_samples=20000, seed=0):
     """
-    Échantillon combinant DEUX sources d'incertitude indépendantes :
-      1. l'incertitude propre du modèle TESR (résidus walk-forward réels,
-         obs - prédit historique, ré-échantillonnés avec remise) ;
-      2. si `bounds` est fourni, la dispersion multi-modèles du SCÉNARIO
-         ENSO lui-même (bornes Q0/P05/P25/P75/P95/Q100 de la projection
-         GMST, obtenues en repassant les quantiles ENSO du Climate
-         Dashboard par le modèle central -- cf. enso_uncertainty /
-         forecast_c3s_q0 etc.).
+    Sample combining TWO independent sources of uncertainty:
+      1. the TESR model's own uncertainty (real walk-forward residuals,
+         obs - historical prediction, resampled with replacement);
+      2. if `bounds` is provided, the multi-model spread of the ENSO
+         SCENARIO itself (Q0/P05/P25/P75/P95/Q100 bounds of the GMST
+         projection, obtained by passing the Climate Dashboard's ENSO
+         quantiles back through the central model -- see
+         enso_uncertainty / forecast_c3s_q0, etc.).
 
-    Sans `bounds` (défaut), reproduit EXACTEMENT le comportement historique
-    (central + résidus, un tirage par résidu, sans ré-échantillonnage) --
-    rétrocompatible avec les appels existants.
+    Without `bounds` (default), reproduces EXACTLY the historical
+    behavior (central + residuals, one draw per residual, no
+    resampling) -- backward compatible with existing calls.
 
-    Avec `bounds` = dict/Series {'q0':, 'p05':, 'p95':, 'q100':, ...}
-    (valeurs en anomalie GMST, °C), la dispersion ENSO est reconstruite
-    par tirage à partir d'une fonction quantile linéaire par morceaux
-    ancrée sur ces points + la valeur centrale (mediane), puis CHAQUE
-    tirage ENSO est combiné à un résidu tiré indépendamment (avec remise)
-    -- les deux sources ne sont donc jamais comptées deux fois l'une dans
-    l'autre.
+    With `bounds` = dict/Series {'q0':, 'p05':, 'p95':, 'q100':, ...}
+    (values in GMST anomaly, C), the ENSO spread is reconstructed by
+    drawing from a piecewise-linear quantile function anchored on
+    these points + the central value (median), then EACH ENSO draw is
+    combined with an independently drawn residual (with replacement)
+    -- so the two sources are never double-counted.
 
-    Les clés 'p25'/'p75' sont OPTIONNELLES (rétrocompatibilité avec des
-    `bounds` ne contenant que q0/p05/p95/q100) : si elles sont présentes,
-    la fonction quantile utilise 7 points (Q0-P05-P25-mediane-P75-P95-
-    Q100) au lieu de 5, ce qui resserre l'interpolation autour du corps
-    de la distribution (là où l'essentiel de la masse de probabilité se
-    trouve) plutôt que de relier P05 à la mediane par un seul segment
-    linéaire.
+    The 'p25'/'p75' keys are OPTIONAL (backward compatible with
+    `bounds` containing only q0/p05/p95/q100): if present, the
+    quantile function uses 7 points (Q0-P05-P25-median-P75-P95-Q100)
+    instead of 5, which tightens the interpolation around the body of
+    the distribution (where most of the probability mass lies) rather
+    than connecting P05 to the median with a single linear segment.
     """
     if bounds is None:
         return central + residuals
@@ -917,9 +918,9 @@ def _combined_uncertainty_samples(central, residuals, bounds=None, n_samples=200
     else:
         probs = np.array([0.0, 5.0, 50.0, 95.0, 100.0]) / 100.0
         vals = np.array([q0, p05, central, p95, q100])
-    # -- garde-fou : impose la monotonie (au cas où le point central du
-    #    modèle dévierait légèrement de la mediane multi-modèles, ce qui
-    #    peut arriver car ce ne sont pas rigoureusement la même quantité) --
+    # -- safeguard: enforces monotonicity (in case the model's central
+    #    point deviates slightly from the multi-model median, which
+    #    can happen since they are not rigorously the same quantity) --
     vals = np.maximum.accumulate(vals)
 
     rng = np.random.default_rng(seed)
@@ -936,24 +937,25 @@ def plot_probability_heatmap(forecast_df, residuals, thresholds=(1.5, 1.6, 1.7, 
                               subtitle="TESR model - empirical probability",
                               filename="gmst_probability_heatmap.png"):
     """
-    Tableau de probabilité de dépassement de seuils (ex. +1.5°C, +2°C, et
-    étapes intermediaires) pour chaque mois d'un DataFrame de prévision.
+    Table of threshold-exceedance probabilities (e.g. +1.5C, +2C, and
+    intermediate steps) for each month of a forecast DataFrame.
 
-    Méthode : pour chaque mois, on prend la prédiction centrale du modèle
-    et on lui ajoute l'échantillon empirique des résidus walk-forward
-    (observé - prédit, mesurés hors échantillon sur l'historique réel).
-    La probabilité de dépassement d'un seuil T est simplement la
-    proportion de cet échantillon (central + résidus) qui dépasse T.
-    Plus robuste qu'une hypothèse gaussienne symétrique : les résidus
-    réels sont ici modérément asymétriques (queue plus lourde vers le
-    chaud), ce qui est repris fidèlement par cette approche empirique.
+    Method: for each month, the model's central prediction is taken
+    and the empirical sample of walk-forward residuals (observed -
+    predicted, measured out-of-sample on the real historical record)
+    is added to it. The probability of exceeding a threshold T is
+    simply the proportion of this sample (central + residuals) that
+    exceeds T. More robust than a symmetric Gaussian assumption: the
+    real residuals here are moderately skewed (heavier tail toward the
+    warm side), which is faithfully captured by this empirical
+    approach.
 
-    Paramètres
+    Parameters
     ----------
-    forecast_df : DataFrame de prévision (colonne 'gmst_anom_pred_preind')
-    residuals : array des résidus walk-forward (obs - prédit), issus par
-                exemple d'une validation walk-forward sur l'historique.
-    thresholds : liste des seuils (°C) à évaluer, en colonnes du tableau.
+    forecast_df : forecast DataFrame (column 'gmst_anom_pred_preind')
+    residuals : array of walk-forward residuals (obs - predicted), for
+                example from a walk-forward validation on the record.
+    thresholds : list of thresholds (C) to evaluate, as table columns.
     """
     months = forecast_df.index
     table = np.zeros((len(months), len(thresholds)))
@@ -969,11 +971,11 @@ def plot_probability_heatmap(forecast_df, residuals, thresholds=(1.5, 1.6, 1.7, 
         subtitle += " - samples include multi-model ENSO spread uncertainty"
 
     plt.rcParams['font.family'] = 'serif'
-    # header_inches doit couvrir le titre (2 lignes, 14.5pt bold) + le
-    # sous-titre -- l'ancienne valeur (0.5in) sous-évaluait la hauteur réelle
-    # du titre 2 lignes, et le sous-titre était positionné à une fraction de
-    # figure FIXE (y=0.9) indépendante de header_inches/fig_height : les deux
-    # se chevauchaient dès que le titre prenait sa pleine hauteur.
+    # header_inches must cover the title (2 lines, 14.5pt bold) + the
+    # subtitle -- the old value (0.5in) underestimated the actual height
+    # of the 2-line title, and the subtitle was positioned at a FIXED
+    # figure fraction (y=0.9) independent of header_inches/fig_height: the
+    # two would overlap as soon as the title took its full height.
     header_inches = 0.95
     fig_height = max(5, 0.42 * len(months) + 2) + header_inches
     fig, ax = plt.subplots(figsize=(8.5, fig_height))
@@ -985,12 +987,12 @@ def plot_probability_heatmap(forecast_df, residuals, thresholds=(1.5, 1.6, 1.7, 
     ax.set_yticks(range(len(months)))
     ax.set_yticklabels([_month_label(m).capitalize() for m in months], fontsize=9.5)
 
-    # -- Couleur du texte : contraste calculé depuis la LUMINANCE RÉELLE de la
-    #    couleur de cellule (via la colormap), pas un seuil de % arbitraire --
-    #    l'ancienne règle ("white if val > 55 else '#1a1a1a'") ne blanchissait
-    #    le texte QUE côté fort pourcentage, jamais côté proche de 0%, alors
-    #    que ces cellules-là sont tout aussi sombres (bleu foncé). Cette
-    #    version reste correcte quelle que soit la colormap utilisée. --
+    # -- Text color: contrast computed from the cell color's ACTUAL
+    #    LUMINANCE (via the colormap), not an arbitrary % threshold --
+    #    the old rule ("white if val > 55 else '#1a1a1a'") only whitened
+    #    the text on the high-percentage side, never near 0%, even
+    #    though those cells are just as dark (dark blue). This version
+    #    stays correct regardless of the colormap used. --
     cmap_probability = plt.get_cmap(PROBABILITY_CMAP)
     for i in range(len(months)):
         for j in range(len(thresholds)):
@@ -1032,10 +1034,10 @@ def plot_probability_distribution(central_value, residuals, month_label,
                                    subtitle=None,
                                    filename="gmst_probability_distribution.png"):
     """
-    Distribution de probabilité (histogramme + densité lissée) de
-    l'anomalie GMST pour un mois donné, construite en ajoutant à la
-    prédiction centrale l'échantillon empirique des résidus walk-forward
-    du modèle. Zones ombrées = probabilité de dépasser chaque seuil.
+    Probability distribution (histogram + smoothed density) of the
+    GMST anomaly for a given month, built by adding to the central
+    prediction the model's empirical sample of walk-forward residuals.
+    Shaded areas = probability of exceeding each threshold.
     """
     from scipy.stats import gaussian_kde
 
@@ -1053,20 +1055,20 @@ def plot_probability_distribution(central_value, residuals, month_label,
     plt.rcParams['font.family'] = 'serif'
     fig, ax = plt.subplots(figsize=(10, 5.5))
 
-    # On laisse la queue du KDE (noyau gaussien) se prolonger et retomber
-    # naturellement vers 0 au-delà du min/max empirique, plutôt que de
-    # couper l'affichage pile à la plage brute : une coupure nette à cet
-    # endroit est visuellement incohérente (rupture brutale alors que la
-    # densité y est encore non nulle). La grille est donc étendue d'une
-    # marge basée sur la largeur de bande du KDE.
+    # The KDE (Gaussian kernel) tail is allowed to extend and taper
+    # naturally toward 0 beyond the empirical min/max, rather than
+    # cutting the display exactly at the raw range: a hard cutoff there
+    # is visually inconsistent (an abrupt break while the density is
+    # still non-zero). The grid is therefore extended by a margin based
+    # on the KDE bandwidth.
     emp_min, emp_max = samples.min(), samples.max()
     kde = gaussian_kde(samples)
     bw = kde.factor * samples.std(ddof=1)
     margin = 3 * bw
     x_grid = np.linspace(emp_min - margin, emp_max + margin, 500)
     density = kde(x_grid)
-    # renormalise la densité affichée pour qu'elle intègre à 1 sur la
-    # plage affichée (sinon l'extension de la grille biaiserait l'aire)
+    # renormalizes the displayed density so it integrates to 1 over the
+    # displayed range (otherwise extending the grid would bias the area)
     dx = x_grid[1] - x_grid[0]
     density = density / (np.sum(density) * dx)
 
@@ -1111,16 +1113,16 @@ def plot_probability_distribution(central_value, residuals, month_label,
 def compute_forecast_synthesis(forecast_df, residuals, thresholds=(1.5, 2.0),
                                 extreme_percentiles=(0, 100)):
     """
-    Synthèse mois par mois : prédiction centrale, les DEUX EXTRÊMES de la
-    prévision (percentiles bas/haut de la distribution empirique
-    central + résidus walk-forward réels), et probabilité de dépassement
-    de chaque seuil.
+    Month-by-month summary: central prediction, the TWO EXTREMES of the
+    forecast (low/high percentiles of the empirical distribution
+    central + real walk-forward residuals), and the exceedance
+    probability of each threshold.
 
-    "Extreme low/high" ici = percentiles empiriques (par défaut 0%/100%,
-    soit le minimum et le maximum réellement observés dans l'échantillon
-    walk-forward, c-à-d 100% du spectre), PAS une hypothèse gaussienne :
-    ce sont les bornes réellement atteintes par l'échantillon empirique
-    (central + résidus walk-forward réels, hors échantillon).
+    "Extreme low/high" here = empirical percentiles (default 0%/100%,
+    i.e. the minimum and maximum actually observed in the walk-forward
+    sample, i.e. 100% of the spread), NOT a Gaussian assumption: these
+    are the bounds actually reached by the empirical sample (central +
+    real out-of-sample walk-forward residuals).
     """
     p_low, p_high = extreme_percentiles
     rows = []
@@ -1128,15 +1130,15 @@ def compute_forecast_synthesis(forecast_df, residuals, thresholds=(1.5, 2.0),
         central = forecast_df.loc[m, 'gmst_anom_pred_preind']
         samples = central + residuals
         row = {
-            'mois': m,
+            'month': m,
             'central': central,
-            f'extreme_bas_p{p_low}': np.percentile(samples, p_low),
-            f'extreme_haut_p{p_high}': np.percentile(samples, p_high),
+            f'extreme_low_p{p_low}': np.percentile(samples, p_low),
+            f'extreme_high_p{p_high}': np.percentile(samples, p_high),
         }
         for t in thresholds:
-            row[f'proba_gt_{t}'] = np.mean(samples > t) * 100
+            row[f'prob_gt_{t}'] = np.mean(samples > t) * 100
         rows.append(row)
-    return pd.DataFrame(rows).set_index('mois')
+    return pd.DataFrame(rows).set_index('month')
 
 
 def plot_enso_amplification(decomp, forecast_neutral, residuals, enso_bounds_df=None,
@@ -1494,12 +1496,12 @@ def plot_monthly_table(synthesis_df,
     ax.axis('off')
 
     col_labels = ['Mois', 'Central (°C)', 'Extreme low (C)', 'Extreme high (C)'] + \
-                 [f'P(> +{c.split("_")[-1]}°C)' for c in cols if c.startswith('proba_gt_')]
+                 [f'P(> +{c.split("_")[-1]}°C)' for c in cols if c.startswith('prob_gt_')]
     cell_text = []
     for m, row in synthesis_df.iterrows():
         line = [_month_label(m).capitalize(), f"{row['central']:+.2f}"]
         line += [f"{row[c]:+.2f}" for c in cols if c.startswith('extreme_')]
-        line += [f"{row[c]:.0f}%" for c in cols if c.startswith('proba_gt_')]
+        line += [f"{row[c]:.0f}%" for c in cols if c.startswith('prob_gt_')]
         cell_text.append(line)
 
     # Table ancrée en haut de la zone disponible (juste sous le sous-titre),
@@ -2080,14 +2082,14 @@ def plot_forecast_zoom(df, forecast_df=None, obs_future=None, zoom=None,
     else:
         ax.legend(loc=legend_loc, frameon=True, framealpha=0.9, fontsize=9)
 
-    fig.suptitle(title, fontsize=15, fontweight='bold', x=0.02, ha='left', y=0.98)
+    fig.suptitle(title, fontsize=15, fontweight='bold', x=0.02, ha='left', y=0.992)
     if subtitle:
         ax.set_title(subtitle, fontsize=10, style='italic', color='#444444',
-                     loc='left', pad=10)
+                     loc='left', pad=8)
 
     fig.text(0.98, 0.005, data_sources, fontsize=7.5, color='#666666', ha='right')
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+    plt.tight_layout(rect=[0, 0.03, 1, 0.975])
     plt.savefig(filename, dpi=300)
     plt.show()
     plt.rcParams['font.family'] = 'sans-serif'
@@ -2381,16 +2383,25 @@ def plot_enso_scenario_envelope(enveloppe_enso, enso_hist_df=None, obs_junction=
                 ax.plot(serie.index, serie.values, 'o--', color=color, lw=1.6, ms=3.5,
                         alpha=0.85, zorder=4, label=f'Analogue {label}')
 
+    # -- Clear boundary between the official scenario (through April 2027)
+    #    and the author-defined H2 2027 extension (May-December 2027).
+    splice = pd.Timestamp('2027-04-01')
+    ax.axvline(splice, color='#555555', lw=1.2, ls=':', zorder=8)
+    ax.text(pd.Timestamp('2027-01-15'), 0.985, 'Official', transform=ax.get_xaxis_transform(),
+            ha='center', va='top', fontsize=9, fontweight='bold', color='#333333')
+    ax.text(pd.Timestamp('2027-08-15'), 0.985, 'H2 extension', transform=ax.get_xaxis_transform(),
+            ha='center', va='top', fontsize=9, fontweight='bold', color='#333333')
+
     # -- Seuils ENSO / catégories d'intensité (étiquettes au bord droit,
     #    pas dans la légende, pour ne pas la surcharger) --
     if show_thresholds:
         thresholds = [
             (-0.5, ENSO_SCALE[-0.5], ':',  'La Niña (-0.5)'),
             (0.5,  ENSO_SCALE[0.5], ':',  'El Niño (+0.5)'),
-            (1.0,  ENSO_SCALE[1.0], '--', 'Moderate El Nino (+1)'),
+            (1.0,  ENSO_SCALE[1.0], '--', 'Moderate El Niño (+1)'),
             (1.5,  ENSO_SCALE[1.5], '--', 'El Niño fort (+1.5)'),
-            (2.0,  ENSO_SCALE[2.0], '--', 'Very strong El Nino (+2)'),
-            (3.0,  ENSO_SCALE[3.0], '--', 'Extreme El Nino (+3)'),
+            (2.0,  ENSO_SCALE[2.0], '--', 'Very strong El Niño (+2)'),
+            (3.0,  ENSO_SCALE[3.0], '--', 'Extreme El Niño (+3)'),
         ]
         for y, color, ls, label in thresholds:
             ax.axhline(y, color=color, ls=ls, lw=1.3, zorder=1, alpha=0.9)
@@ -2413,12 +2424,12 @@ def plot_enso_scenario_envelope(enveloppe_enso, enso_hist_df=None, obs_junction=
     # droite), donc le coin supérieur gauche reste dégagé.
     ax.legend(loc=legend_loc, frameon=True, framealpha=0.9, fontsize=8, ncol=1)
 
-    fig.suptitle(title, fontsize=15, fontweight='bold', x=0.02, ha='left', y=0.98)
-    fig.text(0.02, 0.85, subtitle, fontsize=10, style='italic', color='#444444', ha='left')
+    fig.suptitle(title, fontsize=15, fontweight='bold', x=0.02, ha='left', y=0.985)
+    fig.text(0.02, 0.945, subtitle, fontsize=10, style='italic', color='#444444', ha='left', va='top')
     fig.text(0.91, 0.005, data_sources, fontsize=7.5, color='#666666', ha='right')
 
     # Marge à droite pour les étiquettes de seuils hors zone de tracé
-    plt.tight_layout(rect=[0, 0.03, 0.93, 0.88])
+    plt.tight_layout(rect=[0, 0.03, 0.93, 0.90])
     plt.savefig(filename, dpi=300)
     plt.show()
     plt.rcParams['font.family'] = 'sans-serif'
@@ -2465,34 +2476,31 @@ def plot_enso_scenario_envelope(enveloppe_enso, enso_hist_df=None, obs_junction=
 # connue. `build_h2_2027_scenarios(anchor_offset=...)` permet de décaler
 # les 3 courbes en bloc pour les raccorder à ce point si besoin.
 _H2_2027_ONI_CSV = """date,neutre,central,la_nina_forte
-2027-05-01,0.85,0.75,0.65
-2027-06-01,0.55,0.40,0.20
-2027-07-01,0.25,0.05,-0.30
-2027-08-01,0.05,-0.25,-0.75
-2027-09-01,0.00,-0.40,-1.15
-2027-10-01,0.00,-0.50,-1.55
-2027-11-01,0.00,-0.60,-1.80
-2027-12-01,0.00,-0.65,-1.95
+2027-05-01,1.85,1.75,1.55
+2027-06-01,1.30,1.05,0.70
+2027-07-01,0.80,0.45,-0.10
+2027-08-01,0.40,0.05,-0.65
+2027-09-01,0.15,-0.25,-1.05
+2027-10-01,0.00,-0.45,-1.35
+2027-11-01,-0.05,-0.60,-1.55
+2027-12-01,0.00,-0.70,-1.65
 """
 
 
-def build_h2_2027_scenarios(anchor_offset=0.0):
-    """Construit `h2_scenarios` (dict {'neutre':..., 'central':...,
-    'la_nina_forte':...}, chacun un dict {date_str: valeur ONI}) à partir
-    du CSV `_H2_2027_ONI_CSV` embarqué ci-dessus -- voir l'avertissement
-    en tête de section sur la nature illustrative de ces valeurs.
+def build_h2_2027_scenarios():
+    """Construit les trois trajectoires ONI H2 2027 figées.
 
-    `anchor_offset` : décalage additif (°C) appliqué aux 3 courbes en
-    bloc, pour les recaler sur la vraie valeur ONI officielle d'avril
-    2027 une fois connue (ex. anchor_offset = valeur_reelle_avr27 - 1.0,
-    si 1.0 est la valeur de mai 2027 implicitement supposée par la forme
-    ci-dessus). Laisser à 0.0 tant que ce point de raccord n'est pas
-    vérifié.
+    Les valeurs de mai à décembre 2027 sont des hypothèses d'auteur
+    explicitement prescrites pour l'analyse de sensibilité. Elles sont
+    utilisées telles quelles, sans recalage automatique sur le dernier
+    mois officiel. Cette fonction constitue la source unique des
+    scénarios H2 utilisés par les figures et les tableaux.
     """
-    df = pd.read_csv(io.StringIO(_H2_2027_ONI_CSV), parse_dates=['date']).set_index('date')
-    df = df + anchor_offset
+    df = pd.read_csv(
+        io.StringIO(_H2_2027_ONI_CSV),
+        parse_dates=['date']
+    ).set_index('date')
     return {col: df[col].to_dict() for col in df.columns}
-
 
 # ------------------------------------------------------------------
 # Utilitaires de décomposition (identiques à ceux déjà utilisés pour
@@ -2781,8 +2789,8 @@ def plot_h2_2027_gmst_table(decomps, cis, ext_start, n_boot=250,
     order = ['neutre', 'central', 'la_nina_forte']
     block_titles = {
         'neutre': 'a) Neutral ENSO hypothesis',
-        'central': 'b) Central hypothesis (moderate La Nina)',
-        'la_nina_forte': 'c) Strong La Nina hypothesis',
+        'central': 'b) Central hypothesis (moderate La Niña)',
+        'la_nina_forte': 'c) Strong La Niña hypothesis',
     }
     dates = [d for d in decomps['central'].index if d >= ext_start]
     n_rows = len(dates)
@@ -2998,7 +3006,7 @@ def plot_temp_extended_dec2027(model_fit, official_scenario_aug26_avr27, h2_scen
     ax.plot(full_dates, decomps['neutre']['total'], color='#2980b9', lw=1.6, ls=':', zorder=6,
             label='Neutral ENSO hypothesis (H2 2027)')
     ax.plot(full_dates, decomps['la_nina_forte']['total'], color='#1a1aa6', lw=1.6, ls='-.', zorder=6,
-            label='Strong La Nina hypothesis (H2 2027)')
+            label='Strong La Niña hypothesis (H2 2027)')
 
     obs_pt = gmst['gmst'].loc['2026-07-01']
     ax.plot([pd.Timestamp('2026-07-01')], [obs_pt], marker='s', color='black', ms=8, zorder=8,
@@ -3031,8 +3039,8 @@ def plot_temp_extended_dec2027(model_fit, official_scenario_aug26_avr27, h2_scen
 
     fig.suptitle("TESR-modelled global temperature anomaly under three ENSO hypotheses: "
                  "extended projection through December 2027",
-                 x=0.02, y=0.975, ha='left', fontsize=19, fontweight='bold')
-    fig.text(0.02, 0.925,
+                 x=0.02, y=0.99, ha='left', fontsize=19, fontweight='bold')
+    fig.text(0.02, 0.945,
               "Projection July 2026-December 2027 - with El Nino vs ENSO-neutral - Departure from preindustrial "
               "baseline (1850-1900), \u00b0C - TESR model, lag = 3 months\n"
               f"July 2026-{splice_month:%B %Y}: official scenario (Table 4, initialized 1 August 2026) - "
@@ -3043,7 +3051,7 @@ def plot_temp_extended_dec2027(model_fit, official_scenario_aug26_avr27, h2_scen
     ax.legend(loc='center left', fontsize=9.8, framealpha=0.95, ncol=1, bbox_to_anchor=(1.01, 0.5))
     fig.text(0.99, 0.008, data_sources, fontsize=8.5, color='#666', ha='right')
 
-    plt.tight_layout(rect=[0, 0.02, 0.83, 0.90])
+    plt.tight_layout(rect=[0, 0.02, 0.83, 0.92])
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
 
@@ -3140,8 +3148,8 @@ def plot_oni_h2_2027_table(h2_scenarios,
     sans recalcul. Exporte les mêmes valeurs en CSV.
     """
     order = ['neutre', 'central', 'la_nina_forte']
-    disp_names = {'neutre': 'Neutral ENSO', 'central': 'Central (moderate La Nina)',
-                  'la_nina_forte': 'Strong La Nina'}
+    disp_names = {'neutre': 'Neutral ENSO', 'central': 'Central (moderate La Niña)',
+                  'la_nina_forte': 'Strong La Niña'}
     dates = sorted({pd.Timestamp(k) for k in h2_scenarios['central']})
 
     export_cols = {lbl: [] for lbl in order}
@@ -3172,14 +3180,18 @@ def plot_oni_official_table(official_scenario_aug26_avr27, q0, q5, q25, q75, q95
     """
     Tableau mensuel du scénario ONI officiel (Août 2026-Avril 2027) :
     médiane multi-modèle + bandes de quantiles emboîtées Q0-Q100/Q5-Q95/
-    Q25-Q75 (APPROXIMATION -- même avertissement que la figure, cf. tête
-    de fichier : cône reconstruit faute du fichier membre-par-membre).
+    Q25-Q75, calculés directement à partir de la distribution
+    membre-par-membre du Climate Dashboard.
     `q0`..`q100` sont les mêmes pd.Series (indexées sur x_dates) déjà
     calculées dans plot_oni_extended_dec2027(), passées telles quelles.
     Exporte les mêmes valeurs en CSV.
     """
     init_date = pd.Timestamp(init_date)
-    dates = sorted(pd.Timestamp(k) for k in official_scenario_aug26_avr27)
+    dates = sorted(
+        pd.Timestamp(k)
+        for k in official_scenario_aug26_avr27
+        if init_date <= pd.Timestamp(k) <= pd.Timestamp("2027-04-01")
+    )
 
     export = pd.DataFrame({
         'median_C': [official_scenario_aug26_avr27[d.strftime('%Y-%m-%d')] for d in dates],
@@ -3200,171 +3212,286 @@ def plot_oni_official_table(official_scenario_aug26_avr27, q0, q5, q25, q75, q95
         ])
     col_labels = ['Month', 'Median\n(ONI, \u00b0C)', 'Q25-Q75\n(\u00b0C)', 'Q5-Q95\n(\u00b0C)', 'Q0-Q100\n(\u00b0C)']
     subtitle = (f"{dates[0]:%B %Y}-{dates[-1]:%B %Y} - official multi-model scenario (Climate Dashboard), "
-                f"initialized {init_date.day} {init_date:%B %Y} - approximate reconstruction of the quantile "
-                f"envelope (member-by-member file not available here) - ONI / Nino 3.4 index, 1991-2020 baseline")
+                f"initialized {init_date.day} {init_date:%B %Y} - member-level quantiles - ONI / Nino 3.4 "
+                f"index, 1991-2020 baseline")
     return _render_oni_table(col_labels, cell_text,
-                              "Official ONI forecast (approximate multi-model envelope)",
+                              "Official ONI forecast (member-level multi-model distribution)",
                               subtitle, filename, csv_export=export, csv_filename=csv_filename,
                               fig_width=10.5, highlight_col=1,
-                              data_sources="Data: The Climate Brink @ ENSO Dashboard (approx. reconstruction)")
+                              data_sources="Data: The Climate Brink @ ENSO Dashboard (member-level multi-model distribution)")
 
 
 def plot_oni_extended_dec2027(model_fit, official_scenario_aug26_avr27, h2_scenarios,
                                analogs_24m, init_date="2026-08-01",
-                               filename="oni_extended_synthesis_dec2027.png",
+                               filename="oni_extended_synthesis_dec2027_v10.png",
                                h2_table_filename="oni_h2_2027_hypotheses_table.png",
                                h2_table_csv_filename="oni_h2_2027_hypotheses_table.csv",
                                official_table_filename="oni_official_table_aug26_apr27.png",
                                official_table_csv_filename="oni_official_table_aug26_apr27.csv",
-                               data_sources="Data: The Climate Brink @ ENSO Dashboard (Jan26-Apr27); "
-                                            "ClimateReanalyzer (analogues, obs); H2 2027 hypotheses = author"):
-    """
-    analogs_24m : dict {"1982/1983": np.array(24 valeurs), "1997/1998": ..., "2015/2016": ...}
-        -- séries Niño 3.4 Janvier(année pic)-Décembre(année pic+1), alignées par POSITION
-        calendaire (Jan matche Jan, etc.) sur l'axe Jan2026-Déc2027, exactement comme
-        dans votre Fig. 9 originale.
+                               data_sources="Data: The Climate Brink @ ENSO Dashboard (Aug26-Apr27); "
+                                            "ClimateReanalyzer (analogues, obs); H2 2027 hypotheses = author",
+                               official_ensemble_bounds=None):
+    """ONI observations + official forecast (Aug 2026-Apr 2027) + H2 2027.
 
-    Conserve les bandes de quantiles emboîtées (Q0-Q100/Q5-Q95/Q25-Q75) sur toute la
-    période officielle (Août 2026-Avril 2027, palette orange = reconstruction
-    approximative de l'enveloppe multi-modèles) ET sur l'extension (Mai-Décembre 2027,
-    palette bleue = hypothèses d'auteur), avec une couleur nettement différente pour
-    ne jamais confondre les deux régimes de confiance.
+    The two hand-offs are made explicitly continuous:
+      * July -> August 2026: the official envelope starts exactly at the
+        observed July value (zero spread) and opens toward the August forecast.
+      * April -> May 2027: the H2 envelope starts from the actual April official
+        quantiles and keeps exactly the same absolute dispersion thereafter.
+
+    H2 paths are fixed author-defined hypotheses. No automatic re-anchoring is
+    applied to their prescribed values.
     """
     nino_obs = model_fit['nino']['ssta']
     init_date = pd.Timestamp(init_date)
+    official_end = pd.Timestamp('2027-04-01')
+    extension_start = pd.Timestamp('2027-05-01')
+    last_obs = pd.Timestamp(nino_obs.index[-1])
     x_dates = pd.date_range('2026-01-01', '2027-12-01', freq='MS')
-    splice = pd.Timestamp('2027-04-15')
+    splice = pd.Timestamp('2027-04-01')
 
+    # ------------------------------------------------------------------
+    # Median trajectory: observations through July, official Aug-Apr,
+    # fixed author hypothesis (central) May-Dec.
+    # ------------------------------------------------------------------
     median_path = {}
-    for d in pd.date_range('2026-01-01', '2026-07-01', freq='MS'):
+    for d in pd.date_range('2026-01-01', last_obs, freq='MS'):
         median_path[d] = nino_obs.loc[d]
     for k, v in official_scenario_aug26_avr27.items():
-        median_path[pd.Timestamp(k)] = v
+        d = pd.Timestamp(k)
+        if init_date <= d <= official_end:
+            median_path[d] = v
     for k, v in h2_scenarios['central'].items():
-        median_path[pd.Timestamp(k)] = v
-    median = pd.Series(median_path).sort_index().reindex(x_dates)
+        d = pd.Timestamp(k)
+        if extension_start <= d <= x_dates[-1]:
+            median_path[d] = v
+    median = pd.Series(median_path, dtype=float).sort_index().reindex(x_dates)
 
-    low_path, high_path = median.copy(), median.copy()
+    # ------------------------------------------------------------------
+    # H2 hypothesis paths. The central path is NOT a La Nina threshold:
+    # it is simply the central author-defined continuation.
+    # ------------------------------------------------------------------
+    low_path = median.copy()
+    high_path = median.copy()
+    april_value = float(median.loc[official_end])
+    low_path.loc[official_end] = april_value
+    high_path.loc[official_end] = april_value
     for k, v in h2_scenarios['la_nina_forte'].items():
-        low_path[pd.Timestamp(k)] = v
+        d = pd.Timestamp(k)
+        if extension_start <= d <= x_dates[-1]:
+            low_path.loc[d] = v
     for k, v in h2_scenarios['neutre'].items():
-        high_path[pd.Timestamp(k)] = v
+        d = pd.Timestamp(k)
+        if extension_start <= d <= x_dates[-1]:
+            high_path.loc[d] = v
 
-    # --- bandes période officielle : cône d'incertitude croissant avec le délai de
-    #     prévision (APPROXIMATION -- cf. avertissement en tête de fichier) ---
-    lead = np.array([max((d.year - init_date.year) * 12 + (d.month - init_date.month), 0) for d in x_dates])
-    hw0 = 0.49 + 0.145 * lead
-    hw5, hw25 = 0.60 * hw0, 0.30 * hw0
-    official_mask = (x_dates >= init_date) & (x_dates <= pd.Timestamp('2027-04-01'))
+    # ------------------------------------------------------------------
+    # Official uncertainty: use the TRUE member-level multi-model
+    # distribution from enso_members_oni.csv. No reconstruction.
+    # The official period is strictly August 2026-April 2027.
+    # ------------------------------------------------------------------
+    if official_ensemble_bounds is None:
+        raise ValueError(
+            "official_ensemble_bounds must be supplied from "
+            "load_enso_dashboard_scenario(); the official ONI table/figure "
+            "must use the true member-level quantiles."
+        )
 
-    q0, q100 = median.copy(), median.copy()
-    q5, q95 = median.copy(), median.copy()
-    q25, q75 = median.copy(), median.copy()
-    q0[official_mask] = median[official_mask] - hw0[official_mask]
-    q100[official_mask] = median[official_mask] + hw0[official_mask]
-    q5[official_mask] = median[official_mask] - hw5[official_mask]
-    q95[official_mask] = median[official_mask] + hw5[official_mask]
-    q25[official_mask] = median[official_mask] - hw25[official_mask]
-    q75[official_mask] = median[official_mask] + hw25[official_mask]
+    bounds = official_ensemble_bounds.copy()
+    bounds.index = pd.to_datetime(bounds.index)
+    bounds = bounds.sort_index()
+    official_mask = (x_dates >= init_date) & (x_dates <= official_end)
+    official_dates = x_dates[official_mask]
 
-    # --- bandes extension : enveloppe des 3 hypothèses ---
-    ext_mask = x_dates >= pd.Timestamp('2027-05-01')
-    q0[ext_mask], q100[ext_mask] = low_path[ext_mask], high_path[ext_mask]
-    q5[ext_mask] = low_path[ext_mask] + 0.10 * (median[ext_mask] - low_path[ext_mask])
-    q95[ext_mask] = high_path[ext_mask] - 0.10 * (high_path[ext_mask] - median[ext_mask])
-    q25[ext_mask] = low_path[ext_mask] + 0.50 * (median[ext_mask] - low_path[ext_mask])
-    q75[ext_mask] = high_path[ext_mask] - 0.50 * (high_path[ext_mask] - median[ext_mask])
+    q0 = median.copy(); q100 = median.copy()
+    q5 = median.copy(); q95 = median.copy()
+    q25 = median.copy(); q75 = median.copy()
 
-    fig, ax = plt.subplots(figsize=(16, 9.2))
+    # load_enso_dashboard_scenario() returns the exact weighted quantiles:
+    # q0/q100 = member-level min/max; p05/p25/p75/p95 = model-equal
+    # weighted percentiles; median = model-equal weighted median.
+    for target, source_col in ((q0, 'q0'), (q100, 'q100'),
+                               (q5, 'p05'), (q95, 'p95'),
+                               (q25, 'p25'), (q75, 'p75')):
+        if source_col not in bounds.columns:
+            raise ValueError(f"Column '{source_col}' missing from official ensemble bounds")
+        vals = bounds[source_col].reindex(official_dates)
+        if vals.isna().any():
+            missing = list(official_dates[vals.isna()])
+            raise ValueError(f"Missing official ONI quantiles for: {missing}")
+        target.loc[official_dates] = vals.to_numpy(dtype=float)
 
-    last_obs = nino_obs.index[-1]
+    # ------------------------------------------------------------------
+    # H2 uncertainty: keep EXACTLY the same absolute dispersion as April
+    # 2027, using the real April member-level quantiles above.
+    # ------------------------------------------------------------------
+    april_q0 = float(q0.loc[official_end])
+    april_q5 = float(q5.loc[official_end])
+    april_q25 = float(q25.loc[official_end])
+    april_q75 = float(q75.loc[official_end])
+    april_q95 = float(q95.loc[official_end])
+    april_q100 = float(q100.loc[official_end])
+
+    halfwidth_q0 = april_value - april_q0
+    halfwidth_q5 = april_value - april_q5
+    halfwidth_q25 = april_value - april_q25
+    halfwidth_q75 = april_q75 - april_value
+    halfwidth_q95 = april_q95 - april_value
+    halfwidth_q100 = april_q100 - april_value
+
+    # Start the blue envelope at April to make the April->May hand-off
+    # continuous; May-Dec are the actual author-defined H2 trajectories.
+    ext_mask = x_dates >= official_end
+    q0[ext_mask] = median[ext_mask] - halfwidth_q0
+    q100[ext_mask] = median[ext_mask] + halfwidth_q100
+    q5[ext_mask] = median[ext_mask] - halfwidth_q5
+    q95[ext_mask] = median[ext_mask] + halfwidth_q95
+    q25[ext_mask] = median[ext_mask] - halfwidth_q25
+    q75[ext_mask] = median[ext_mask] + halfwidth_q75
+
+    # ------------------------------------------------------------------
+    # Plot
+    # ------------------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(18.8, 9.2))
+
     obs_mask = x_dates <= last_obs
-    ax.plot(x_dates[obs_mask], nino_obs.reindex(x_dates[obs_mask]), color='black', lw=1.8,
-            marker='o', ms=3.5, zorder=6, label='Observed (Nino 3.4)')
+    ax.plot(x_dates[obs_mask], nino_obs.reindex(x_dates[obs_mask]),
+            color='black', lw=1.8, marker='o', ms=3.5, zorder=6,
+            label='Observed (Niño 3.4)')
 
-    off_idx = x_dates[(x_dates >= pd.Timestamp('2026-07-01')) & (x_dates <= pd.Timestamp('2027-04-01'))]
-    ax.fill_between(off_idx, q0.reindex(off_idx), q100.reindex(off_idx), color='#fbe0c9', alpha=0.85, lw=0, zorder=1,
-                     label='Q0-Q100 official (approx. reconstruction, Aug26-Apr27)')
-    ax.fill_between(off_idx, q5.reindex(off_idx), q95.reindex(off_idx), color='#f3b487', alpha=0.9, lw=0, zorder=2,
-                     label='Q5-Q95 official (approx. reconstruction)')
-    ax.fill_between(off_idx, q25.reindex(off_idx), q75.reindex(off_idx), color='#e8703a', alpha=0.9, lw=0, zorder=3,
-                     label='Q25-Q75 official (approx. reconstruction)')
-    ax.plot(off_idx, median.reindex(off_idx), color='#c0392b', lw=2.8, marker='o', ms=4.5, zorder=5,
-            label='Official median (Climate Dashboard)')
+    # July -> August: explicit bridge and envelope connection.
+    if last_obs < init_date:
+        ax.plot([last_obs, init_date],
+                [float(nino_obs.loc[last_obs]), float(median.loc[init_date])],
+                color='#c0392b', lw=2.4, zorder=5,
+                label='Observed-to-official hand-off')
 
-    ext_idx = x_dates[x_dates >= pd.Timestamp('2027-04-01')]
-    ax.fill_between(ext_idx, q0.reindex(ext_idx), q100.reindex(ext_idx), color='#c9def2', alpha=0.85, lw=0, zorder=1,
-                     label="Q0-Q100 extension (author hypotheses, illustrative)")
-    ax.fill_between(ext_idx, q5.reindex(ext_idx), q95.reindex(ext_idx), color='#8fb9dd', alpha=0.9, lw=0, zorder=2,
-                     label="Q5-Q95 extension (illustrative)")
-    ax.fill_between(ext_idx, q25.reindex(ext_idx), q75.reindex(ext_idx), color='#3f7cac', alpha=0.9, lw=0, zorder=3,
-                     label="Q25-Q75 extension (illustrative)")
-    ax.plot(ext_idx, median.reindex(ext_idx), color='#1b5e8a', lw=2.8, ls='-', marker='o', ms=4.5, zorder=5,
-            label='Central scenario — H2 2027 extension (author hypothesis)')
-    ax.plot(ext_idx, high_path.reindex(ext_idx), color='#1b5e8a', lw=1.6, ls=':', zorder=4,
-            label='Neutral ENSO hypothesis (extension upper bound)')
-    ax.plot(ext_idx, low_path.reindex(ext_idx), color='#1b5e8a', lw=1.6, ls='-.', zorder=4,
-            label='Strong La Nina hypothesis (extension lower bound)')
+    off_idx = x_dates[(x_dates >= last_obs) & (x_dates <= official_end)]
+    ax.fill_between(off_idx, q0.reindex(off_idx), q100.reindex(off_idx),
+                    color='#fbe0c9', alpha=0.85, lw=0,
+                    label='Q0-Q100 official')
+    ax.fill_between(off_idx, q5.reindex(off_idx), q95.reindex(off_idx),
+                    color='#f3b487', alpha=0.9, lw=0,
+                    label='Q5-Q95 official')
+    ax.fill_between(off_idx, q25.reindex(off_idx), q75.reindex(off_idx),
+                    color='#e8703a', alpha=0.9, lw=0,
+                    label='Q25-Q75 official')
+    ax.plot(off_idx, median.reindex(off_idx), color='#c0392b', lw=2.8,
+            marker='o', ms=4.5, zorder=5,
+            label='Official multi-model median')
+
+    # April -> May: blue envelope starts at April and keeps April dispersion.
+    ext_idx = x_dates[x_dates >= official_end]
+    ax.fill_between(ext_idx, q0.reindex(ext_idx), q100.reindex(ext_idx),
+                    color='#c9def2', alpha=0.85, lw=0,
+                    label='Q0-Q100 extension (April 2027 dispersion)')
+    ax.fill_between(ext_idx, q5.reindex(ext_idx), q95.reindex(ext_idx),
+                    color='#8fb9dd', alpha=0.9, lw=0,
+                    label='Q5-Q95 extension (April 2027 dispersion)')
+    ax.fill_between(ext_idx, q25.reindex(ext_idx), q75.reindex(ext_idx),
+                    color='#3f7cac', alpha=0.9, lw=0,
+                    label='Q25-Q75 extension (April 2027 dispersion)')
+
+    # Three H2 hypotheses: neutral / central / strong La Nina.
+    ax.plot(ext_idx, median.reindex(ext_idx), color='#0b3d91', lw=3.2,
+            ls='-', marker='o', ms=4.5, zorder=5,
+            label='Central ENSO hypothesis')
+    ax.plot(ext_idx, high_path.reindex(ext_idx), color='#63a8d8', lw=1.8,
+            ls='--', marker='o', ms=3.2, zorder=4,
+            label='Neutral ENSO hypothesis')
+    ax.plot(ext_idx, low_path.reindex(ext_idx), color='#163a7a', lw=1.8,
+            ls='--', marker='o', ms=3.2, zorder=4,
+            label='Strong La Niña hypothesis')
 
     colors_analog = {'1982/1983': '#8a6d3b', '1997/1998': '#6a3d9a', '2015/2016': '#c2185b'}
     for label, vals in analogs_24m.items():
-        ax.plot(x_dates, vals, color=colors_analog.get(label, '#333'), lw=1.6, ls='--',
-                marker='o', ms=3.5, zorder=4, label=f'Analog {label}')
+        ax.plot(x_dates, vals, color=colors_analog.get(label, '#333'), lw=1.6,
+                ls='--', marker='o', ms=3.5, zorder=4, label=f'Analog {label}')
 
-    cats = [(3.0, 'Extreme El Nino (+3)', '#7b241c'), (2.0, 'Very strong El Nino (+2)', '#e74c3c'),
-            (1.5, 'Strong El Nino (+1.5)', '#e67e22'), (1.0, 'Moderate El Nino (+1)', '#f1c40f'),
-            (0.5, 'El Nino (+0.5)', '#f4d03f'), (-0.5, 'La Nina (-0.5)', '#5dade2')]
-    for val, lab, color in cats:
+    # ENSO classification thresholds.
+    # Labels are placed outside the plotting area, horizontally aligned with
+    # the corresponding dashed threshold lines.
+    cats = [
+        (3.0, '#7b241c', 'Extreme El Niño'),
+        (2.0, '#e74c3c', 'Very strong El Niño'),
+        (1.5, '#e67e22', 'Strong El Niño'),
+        (1.0, '#f1c40f', 'Moderate El Niño'),
+        (0.5, '#f4d03f', 'Weak El Niño'),
+        (-0.5, '#5dade2', 'Weak La Niña'),
+        (-1.0, '#2f7fbd', 'Moderate La Niña'),
+        (-1.5, '#163a7a', 'Strong La Niña'),
+        (-2.0, '#12315f', 'Very strong La Niña'),
+        (-3.0, '#081d3b', 'Extreme La Niña'),
+    ]
+    for val, color, label in cats:
         ax.axhline(val, color=color, ls='--', lw=1.2, zorder=0, alpha=0.85)
-        ax.text(x_dates[-1] + pd.Timedelta(days=12), val, lab, color=color, fontsize=9.5,
-                fontweight='bold', va='center')
     ax.axhline(0, color='gray', lw=0.8, zorder=0)
 
-    ylo, yhi = -1.4, 6.3
-    ax.set_ylim(ylo, yhi)
-    ax.axvline(splice, color='#555555', lw=1.1, ls=':', zorder=9)
-    ax.annotate('official', xy=(splice, 5.6), xytext=(-8, 0), textcoords='offset points',
-                fontsize=9.5, color='#333', ha='right', va='center', rotation=90,
-                bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#999', alpha=0.9, linewidth=0.6), zorder=10)
-    ax.annotate('H2 2027 extension', xy=(splice, 5.6), xytext=(8, 0), textcoords='offset points',
-                fontsize=9.5, color='#1b5e8a', ha='left', va='center', rotation=90,
-                bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#1b5e8a', alpha=0.9, linewidth=0.6), zorder=10)
+    ax.set_ylim(-3.1, 6.7)  # Final ONI y-range: leave headroom above +3°C and show -3°C threshold
+    # Official/H2 boundary: exactly at the April 2027 monthly tick.
+    ax.axvline(pd.Timestamp('2027-04-01'), color='#555555', lw=1.2, ls=':', zorder=9)
+    ax.set_xlim(pd.Timestamp('2026-01-01'), pd.Timestamp('2027-12-31'))
 
-    ax.set_ylabel("ONI | Nino 3.4 index (\u00b0C) [1991-2020 baseline]", fontsize=11)
+    ax.set_ylabel("ONI | Niño 3.4 index (°C) [1991-2020 baseline]", fontsize=11)
     ax.grid(alpha=0.2)
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
     fig.autofmt_xdate(rotation=90)
-    ax.legend(loc='center left', fontsize=8.6, framealpha=0.95, ncol=1, bbox_to_anchor=(1.10, 0.5))
 
-    fig.suptitle("ONI | Nino 3.4 index — synthesis and extension through December 2027",
-                 x=0.02, y=0.975, ha='left', fontsize=19, fontweight='bold')
-    fig.text(0.02, 0.928,
-              "Official (August 2026-April 2027, orange tones): approximate reconstruction of the multi-model "
-              "envelope (Climate Dashboard, initialized 1 August 2026 — member-by-member file not available here)\n"
-              "Extension (May-December 2027, blue tones): ILLUSTRATIVE envelope built on 3 author hypotheses "
-              "(strong La Nina / central / neutral ENSO), not a multi-model scenario",
-              fontsize=10.5, style='italic', color='#555555', ha='left', va='top')
+    # Explicit official / extension distinction, kept inside the plot at the
+    # very top so it cannot collide with the right-hand classification panel.
+    ax.text(pd.Timestamp('2026-12-15'), 0.985, 'Official',
+            transform=ax.get_xaxis_transform(), ha='center', va='top',
+            fontsize=9.5, fontweight='bold', color='#a33a16')
+    ax.text(pd.Timestamp('2027-08-15'), 0.985, 'H2 extension',
+            transform=ax.get_xaxis_transform(), ha='center', va='top',
+            fontsize=9.5, fontweight='bold', color='#174f86')
+
+    # Keep the plotting area wide; reserve only a narrow right-hand panel.
+    # The right margin is intentionally modest to avoid unnecessary white space.
+    fig.subplots_adjust(left=0.075, right=0.805, top=0.865, bottom=0.12)
+
+    # Classification labels sit just outside the axes and are aligned directly
+    # with the dashed threshold lines. No generic 'ENSO intensity' heading.
+    for val, color, label in cats:
+        ax.annotate(label,
+                    xy=(1.0, val), xycoords=('axes fraction', 'data'),
+                    xytext=(8, 0), textcoords='offset points',
+                    ha='left', va='center', fontsize=8.6, fontweight='bold',
+                    color=color, clip_on=False, zorder=12)
+
+    # Legend at the top of the right-hand margin.
+    # Place the legend in the free vertical space between +6.3 and +3.2 °C.
+    # x is kept just outside the plotting area; y is expressed in data units.
+    legend_transform = matplotlib.transforms.blended_transform_factory(ax.transAxes, ax.transData)
+    ax.legend(loc='center left', fontsize=8.0, framealpha=0.95, ncol=1,
+              bbox_to_anchor=(1.01, 4.95), bbox_transform=legend_transform,
+              borderaxespad=0.0)
+
+    # Title and subtitle aligned to the upper-left of the figure.
+    fig.suptitle("ONI | Niño 3.4 index — synthesis and extension through December 2027",
+                 x=0.075, y=0.975, ha='left', fontsize=19, fontweight='bold')
+    fig.text(0.075, 0.932,
+             "Official (August 2026-April 2027, orange tones): member-level multi-model quantiles "
+             "from the Climate Dashboard, initialized 1 August 2026\n"
+             "Extension (May-December 2027, blue tones): ILLUSTRATIVE author hypotheses; uncertainty fixed at "
+             "the April 2027 absolute dispersion",
+             fontsize=10.5, style='italic', color='#555555', ha='left', va='top')
     fig.text(0.99, 0.008, data_sources, fontsize=8, color='#666', ha='right')
 
-    plt.tight_layout(rect=[0, 0.02, 0.85, 0.90])
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
 
-    # -- Tableau ONI : 3 hypothèses H2 2027 (Mai-Décembre), à partir de
-    #    `h2_scenarios` directement (pas de recalcul) --
     h2_table_png, h2_table_csv = plot_oni_h2_2027_table(
         h2_scenarios, filename=h2_table_filename, csv_filename=h2_table_csv_filename)
-
-    # -- Tableau ONI officiel (Août 2026-Avril 2027), à partir des bandes
-    #    q0..q100 déjà calculées ci-dessus pour la figure (même
-    #    reconstruction approximative, pas de recalcul) --
     official_table_png, official_table_csv = plot_oni_official_table(
-        official_scenario_aug26_avr27, q0, q5, q25, q75, q95, q100, init_date=init_date,
-        filename=official_table_filename, csv_filename=official_table_csv_filename)
+        official_scenario_aug26_avr27, q0, q5, q25, q75, q95, q100,
+        init_date=init_date, filename=official_table_filename,
+        csv_filename=official_table_csv_filename)
 
+    print("[ONI FIGURE V12] Title centered over plot; legend balanced; April 2027 boundary; dark-blue median; y-axis to -3.0 C; "
+          "threshold labels removed; figure ends December 2027; SINTEX-F excluded.")
     return filename, h2_table_png, h2_table_csv, official_table_png, official_table_csv
-
 
 
 
@@ -3477,10 +3604,7 @@ if __name__ == "__main__":
     # ==================================================================
     # SCÉNARIO ENSO MÉDIAN (Niño 3.4/ONI prévu, août 2026 -> avril 2027)
     # Source : Climate Dashboard multi-modèles, membre par membre
-    # (enso_members_oni.csv), pondération égale par modèle, SINTEX-F
-    # explicitement exclu (biais froid marqué, tire p05/q0 vers le bas
-    # de façon non représentative des autres modèles -- cf. écart type
-    # par modèle dans le fichier source).
+    # (enso_members_oni.csv), pondération égale par modèle, SINTEX-F inclus.
     #
     # NB méthodologique (à reporter en Limites du manuscrit) : l'indice
     # utilisé pour l'entraînement (nino34_anomaly.csv, ERA5, base 1991-2020)
@@ -3495,7 +3619,7 @@ if __name__ == "__main__":
     EXCLUDE_MODELS = ('SINTEX-F',)
 
     enveloppe_enso = load_enso_dashboard_scenario(PATH_ENSO_MEMBERS, exclude_models=EXCLUDE_MODELS)
-    print("\n--- Enveloppe ENSO (ONI, pondération égale par modèle, SINTEX-F exclu) ---")
+    print("\n--- Enveloppe ENSO (ONI, pondération égale par modèle, SINTEX-F inclus) ---")
     with pd.option_context('display.float_format', '{:+.3f}'.format):
         print(enveloppe_enso)
     enveloppe_enso.to_csv("scenario_enso_enveloppe_exSTX.csv")
@@ -3589,7 +3713,7 @@ if __name__ == "__main__":
           f"{forecast_c3s_p25['gmst_anom_pred_preind'].idxmax():%B %Y}")
 
     # -- Scénarios EXTRÊMES (bornes Q0/Q100 -- min/max bruts du pool de
-    #    membres après exclusion de SINTEX-F, cf. load_enso_dashboard_scenario) :
+    #    membres, SINTEX-F inclus) :
     #    même logique que P05/P95 ci-dessus, mais pour la projection GMST la
     #    plus basse / la plus haute (pas juste P5-P95). Utilisé pour habiller
     #    le graphique scénario-vs-contrefactuel d'une enveloppe de dispersion
@@ -3639,27 +3763,18 @@ if __name__ == "__main__":
     # dernier mois réellement disponible, actuellement avril 2027).
     # ==================================================================
     model_fit = build_model_fit(model, X, dataset, enso_df_raw, gmst_df, lag)
-    official_scenario_aug26_avr27 = {d.strftime('%Y-%m-01'): v
-                                      for d, v in enveloppe_enso['median'].items()}
+    OFFICIAL_END = pd.Timestamp("2027-04-01")
+    official_scenario_aug26_avr27 = {
+        d.strftime('%Y-%m-01'): v
+        for d, v in enveloppe_enso['median'].items()
+        if pd.Timestamp(d) <= OFFICIAL_END
+    }
     official_gmsta_table = {d.strftime('%Y-%m-01'): v
                              for d, v in forecast_c3s_revise['gmst_anom_pred_preind'].items()}
 
-    # -- Recalage des 3 hypothèses ONI H2 2027 sur la vraie valeur officielle --
-    # `_H2_2027_ONI_CSV` (voir build_h2_2027_scenarios) a été construit en
-    # supposant un dernier mois officiel (avril 2027) à ~1.0 degC. Appeler
-    # build_h2_2027_scenarios() sans anchor_offset (comme précédemment)
-    # laisse ce décalage à 0.0 : si la vraie valeur officielle d'avril 2027
-    # diffère de cette hypothèse de calibration -- ce qui est le cas ici --
-    # l'extension (Mai 2027) démarre alors depuis la valeur BRUTE du CSV et
-    # non depuis la trajectoire officielle, d'où la cassure abrupte début H2
-    # observée entre le dernier point officiel et le premier point Mai 2027.
-    # On recale ici les 3 courbes en bloc pour repartir exactement de la
-    # vraie valeur officielle du dernier mois disponible.
-    H2_2027_CALIBRATION_ANCHOR = 1.0  # valeur d'avril 2027 supposée par le CSV (voir avertissement ci-dessus)
-    last_official_month = max(pd.Timestamp(k) for k in official_scenario_aug26_avr27)
-    last_official_value = official_scenario_aug26_avr27[last_official_month.strftime('%Y-%m-01')]
-    h2_anchor_offset = last_official_value - H2_2027_CALIBRATION_ANCHOR
-    h2_scenarios = build_h2_2027_scenarios(anchor_offset=h2_anchor_offset)
+    # H2 2027 : hypothèses d'auteur FIGÉES, utilisées telles quelles.
+    # Aucun recalage automatique sur avril 2027.
+    h2_scenarios = build_h2_2027_scenarios()
 
     png_temp_ext, csv_temp_ext, png_gmst_h2_table, csv_gmst_h2_table = plot_temp_extended_dec2027(
         model_fit, official_scenario_aug26_avr27, h2_scenarios, official_gmsta_table)
@@ -3672,7 +3787,8 @@ if __name__ == "__main__":
         analogs_24m[lbl] = enso_df_raw['enso_ssta'].loc[f'{y0}-01-01':f'{y0+1}-12-01'].values
     (png_oni_ext, png_oni_h2_table, csv_oni_h2_table,
      png_oni_official_table, csv_oni_official_table) = plot_oni_extended_dec2027(
-        model_fit, official_scenario_aug26_avr27, h2_scenarios, analogs_24m)
+        model_fit, official_scenario_aug26_avr27, h2_scenarios, analogs_24m,
+        official_ensemble_bounds=enveloppe_enso)
     print(f"  -> {png_oni_ext}")
     print(f"  -> {png_oni_h2_table} (tableau ONI H2 2027) / {csv_oni_h2_table} (csv)")
     print(f"  -> {png_oni_official_table} (tableau ONI officiel) / {csv_oni_official_table} (csv)")
