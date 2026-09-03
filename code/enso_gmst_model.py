@@ -1,11 +1,11 @@
 """
-enso_gmst_model.py (non-linear model)
+enso_gmst_model.py (v3 -- non-linear model)
 Monthly forecasting model for the global mean surface temperature
 anomaly from the ENSO signal (Nino 3.4 SSTA, 1991-2020 base) and a
 background trend, expressed as a preindustrial anomaly (consistent
 with ERA5 / C3S).
 
-Model:
+Model (v3, non-linear):
     GMST_anom(t) = a + b*t + c*t^2 + d*ENSO(t-lag) + e*[ENSO(t-lag)*t] + resid(t)
 
 - t, t^2: quadratic trend -> captures the recent acceleration of
@@ -1151,37 +1151,37 @@ def plot_enso_amplification(decomp, forecast_neutral, residuals, enso_bounds_df=
                                       "(with El Nino) vs ENSO-neutral counterfactual (Nino 3.4 = 0) - projection initialized 1 August 2026",
                              filename="gmst_enso_amplification.png"):
     """
-    Graphique synthétique demandé (1), version courbe de survie : trace,
-    au mois de pic du scénario (ex. mars 2027), la PROBABILITÉ DE
-    DÉPASSEMENT P(anomalie > seuil) en fonction du seuil -- une courbe
-    décroissante par construction (plus le seuil est haut, moins il est
-    probable de le dépasser) -- SOUS DEUX HYPOTHÈSES ENSO :
-      - scénario central avec El Niño (`decomp['total']`, incertitude =
-        résidus walk-forward + dispersion multi-modèles ENSO si
-        `enso_bounds_df` fourni) ;
-      - contrefactuel ENSO neutre (Niño 3.4 = 0 sur toute la période,
-        `forecast_neutral`, incertitude = résidus walk-forward seuls --
-        le contrefactuel est fixé par construction, sans dispersion de
-        scénario ENSO à propager).
+    Requested summary chart (1), survival-curve version: plots, at the
+    scenario's peak month (e.g. March 2027), the EXCEEDANCE PROBABILITY
+    P(anomaly > threshold) as a function of the threshold -- a curve
+    that decreases by construction (the higher the threshold, the less
+    likely it is to be exceeded) -- UNDER TWO ENSO HYPOTHESES:
+      - central scenario with El Nino (`decomp['total']`, uncertainty =
+        walk-forward residuals + multi-model ENSO spread if
+        `enso_bounds_df` is provided);
+      - ENSO-neutral counterfactual (Nino 3.4 = 0 over the whole
+        period, `forecast_neutral`, uncertainty = walk-forward
+        residuals only -- the counterfactual is fixed by construction,
+        with no ENSO scenario spread to propagate).
 
-    La tendance de fond (réchauffement à long terme) est identique dans
-    les deux courbes -- l'écart entre elles isole donc strictement la
-    contribution d'El Niño. La zone hachurée entre les deux courbes
-    visualise cet excès de risque de dépassement sur TOUTE la plage de
-    seuils (pas seulement les deux seuils marqués) ; son aire, intégrée
-    entre `integral_range` (par défaut 1,5°C-2,0°C), est calculée par
-    trapèzes et affichée en légende -- c'est la version chiffrée de
-    "the integral between the +1.5 and +2C probabilities" demandée : plus
-    cette aire est grande, plus El Niño élève le risque cumulé de
-    franchissement sur cette tranche, indépendamment du niveau exact du
-    seuil retenu dans la tranche.
+    The background trend (long-term warming) is identical in both
+    curves -- the gap between them therefore strictly isolates El
+    Nino's contribution. The hatched area between the two curves
+    visualizes this excess exceedance risk over the WHOLE threshold
+    range (not just the two marked thresholds); its area, integrated
+    over `integral_range` (1.5C-2.0C by default), is computed by the
+    trapezoidal rule and shown in the legend -- this is the numerical
+    version of "the integral between the +1.5 and +2C probabilities"
+    requested: the larger this area, the more El Nino raises the
+    cumulative exceedance risk over that band, independent of the
+    exact threshold chosen within the band.
 
-    Des traits verticaux marquent `thresholds_marked` (par défaut 1,5°C
-    et 2,0°C) avec la probabilité de dépassement sous les deux
-    hypothèses et le facteur d'amplification (avec El Niño / neutre).
+    Vertical lines mark `thresholds_marked` (1.5C and 2.0C by default)
+    with the exceedance probability under both hypotheses and the
+    amplification factor (with El Nino / neutral).
 
-    Retour : DataFrame indexé par seuil (`thresholds_marked`), colonnes
-    ['proba_el_nino_%', 'proba_neutre_%', 'facteur_amplification'].
+    Returns: DataFrame indexed by threshold (`thresholds_marked`),
+    columns ['prob_el_nino_%', 'prob_neutral_%', 'amplification_factor'].
     """
     peak_date = peak_date or decomp['total'].idxmax()
     central_nino = decomp.loc[peak_date, 'total']
@@ -1219,18 +1219,19 @@ def plot_enso_amplification(decomp, forecast_neutral, residuals, enso_bounds_df=
     fig, ax = plt.subplots(figsize=(11, 6.5))
 
     ax.plot(t_grid, p_nino, color=FACTUAL_DARK, lw=2.3,
-            label=f'Avec El Niño ({central_nino:+.2f}°C central)')
+            label=f'With El Nino ({central_nino:+.2f}°C central)')
     ax.plot(t_grid, p_neutral, color='#333333', lw=2.0, ls='--',
-            label=f'ENSO neutre, contrefactuel ({central_neutral:+.2f}°C central)')
+            label=f'ENSO-neutral counterfactual ({central_neutral:+.2f}°C central)')
     ax.fill_between(t_grid, p_neutral, p_nino, where=(p_nino >= p_neutral),
                      facecolor='none', edgecolor=HIGHLIGHT, hatch='////', linewidth=0.0, zorder=2,
                      label="Excess risk due to El Nino")
     ax.fill_between(t_grid, p_neutral, p_nino, where=(p_nino >= p_neutral),
                      color=HIGHLIGHT, alpha=0.14, lw=0, zorder=1.8)
 
-    # -- Aire intégrée (valeur chiffrée), affichée à part de la légende
-    #    pour ne pas la surcharger -- coin haut-droit, zone où les deux
-    #    courbes sont déjà retombées près de 0% donc naturellement libre. --
+    # -- Integrated area (numerical value), shown separately from the
+    #    legend to avoid overloading it -- top-right corner, an area
+    #    where both curves have already dropped near 0% and is
+    #    therefore naturally free. --
     ax.text(0.985, 0.92,
             f"Cumulative excess risk {integral_range[0]:.1f}-{integral_range[1]:.1f}C:\n"
             f"area approx. {aire_excess:.0f} pts%*C between the two curves",
@@ -1238,13 +1239,13 @@ def plot_enso_amplification(decomp, forecast_neutral, residuals, enso_bounds_df=
             fontweight='bold',
             bbox=dict(boxstyle='round', facecolor='white', edgecolor=HIGHLIGHT, alpha=0.92))
 
-    # -- Boîtes d'annotation des seuils marqués, AVEC flèche (repère utile
-    #    pour lire où sur la courbe le seuil est atteint) -- mais pointant
-    #    toujours vers la courbe El Niño (rouge) et placées AU-DESSUS
-    #    d'elle, jamais en diagonale à travers les deux courbes. On
-    #    réserve pour ça une marge au-dessus de 100% (axe étendu jusqu'à
-    #    `y_headroom`, sans graduation au-delà de 100 -- espace "hors
-    #    courbe" garanti quelle que soit la forme des deux courbes). --
+    # -- Marked-threshold annotation boxes, WITH an arrow (a helpful
+    #    marker for reading where on the curve the threshold is
+    #    reached) -- but always pointing to the El Nino curve (red) and
+    #    placed ABOVE it, never diagonally across both curves. A margin
+    #    above 100% is reserved for this (axis extended up to
+    #    `y_headroom`, with no tick beyond 100 -- guaranteed "off-curve"
+    #    space regardless of the shape of the two curves). --
     y_headroom = 114
     colors_t = [WARM_LIGHT, FACTUAL]
     y_boxes = [108, 30]
@@ -1253,14 +1254,14 @@ def plot_enso_amplification(decomp, forecast_neutral, residuals, enso_bounds_df=
         p_n = np.mean(samples_nino > t) * 100
         p_0 = np.mean(samples_neutral > t) * 100
         factor = (p_n / p_0) if p_0 >= 0.5 else np.nan
-        proba_rows.append({'seuil': t, 'proba_el_nino_%': p_n, 'proba_neutre_%': p_0,
-                            'facteur_amplification': factor})
+        proba_rows.append({'threshold': t, 'prob_el_nino_%': p_n, 'prob_neutral_%': p_0,
+                            'amplification_factor': factor})
         ax.axvline(t, color=col, linestyle=':', lw=1.3, zorder=1.5, ymax=1.0)
         ax.scatter([t, t], [p_n, p_0], color=[FACTUAL_DARK, '#333333'], s=32, zorder=6,
                    edgecolor='white', linewidth=0.6)
-        factor_txt = f"soit ×{factor:.1f}" if np.isfinite(factor) else "quasi nulle sans El Niño"
+        factor_txt = f"i.e. x{factor:.1f}" if np.isfinite(factor) else "near zero without El Nino"
         ax.annotate(
-            f"+{t:.1f}°C : {p_n:.0f}% (El Niño) vs {p_0:.0f}% (neutre)\n{factor_txt}",
+            f"+{t:.1f}°C: {p_n:.0f}% (El Nino) vs {p_0:.0f}% (neutral)\n{factor_txt}",
             xy=(t, p_n), xytext=(t + 0.05, y_boxes[i]),
             fontsize=9, fontweight='bold', color=col, ha='left', va='center', zorder=7,
             arrowprops=dict(arrowstyle='->', color=col, lw=1.1),
@@ -1274,11 +1275,12 @@ def plot_enso_amplification(decomp, forecast_neutral, residuals, enso_bounds_df=
     ax.set_yticks([0, 20, 40, 60, 80, 100])
     ax.set_xlim(t_grid[0], t_grid[-1])
     ax.grid(True, alpha=0.25, lw=0.6)
-    ax.axhline(100, color='#cccccc', lw=0.8, zorder=0.5)  # rappel visuel du plafond 100%
+    ax.axhline(100, color='#cccccc', lw=0.8, zorder=0.5)  # visual reminder of the 100% ceiling
     for spine in ['top', 'right']:
         ax.spines[spine].set_visible(False)
-    # -- Légende sortie du graphique (bande dédiée sous l'axe), à distance
-    #    resserrée pour limiter le blanc entre le graphique et la légende. --
+    # -- Legend placed outside the chart (dedicated band below the
+    #    axis), kept close to reduce whitespace between the chart and
+    #    the legend. --
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.11), ncol=3,
               frameon=True, framealpha=0.9, fontsize=9)
 
@@ -1291,7 +1293,7 @@ def plot_enso_amplification(decomp, forecast_neutral, residuals, enso_bounds_df=
     plt.show()
     plt.rcParams['font.family'] = 'sans-serif'
 
-    return pd.DataFrame(proba_rows).set_index('seuil')
+    return pd.DataFrame(proba_rows).set_index('threshold')
 
 
 def plot_climate_baseline_vs_peak(gmst_df, forecast_df, residuals, enso_bounds_df=None,
@@ -1300,26 +1302,26 @@ def plot_climate_baseline_vs_peak(gmst_df, forecast_df, residuals, enso_bounds_d
                                    data_sources="Data: ECMWF/Copernicus C3S - ERA5 (1850-1900 baseline)",
                                    title=None,
                                    subtitle=None,
-                                   filename="gmst_climat_actuel_vs_pic.png"):
+                                   filename="gmst_current_climate_vs_peak.png"):
     """
-    Graphique synthétique demandé (2) : distribution en cloche du
-    "climat actuel" -- anomalies mensuelles OBSERVÉES sur
-    `baseline_period` (par défaut 2016-2026), ajustées par une loi
-    normale -- comparée à la distribution PROJETÉE du mois de pic du
-    scénario (ex. mars 2027 : central + résidus walk-forward +
-    dispersion multi-modèles ENSO si `enso_bounds_df` fourni), pour
-    visualiser à quel point cette dernière s'écarte de la variabilité
-    récente "normale".
+    Requested summary chart (2): bell-shaped distribution of the
+    "current climate" -- monthly anomalies OBSERVED over
+    `baseline_period` (2016-2026 by default), fitted with a normal
+    distribution -- compared to the PROJECTED distribution for the
+    scenario's peak month (e.g. March 2027: central + walk-forward
+    residuals + multi-model ENSO spread if `enso_bounds_df` is
+    provided), to visualize how far the latter departs from recent
+    "normal" variability.
 
-    L'écart est quantifié de deux façons :
-      - en écarts-types de la distribution de référence (z-score du
-        centre de la distribution projetée par rapport à μ/σ du
-        climat actuel) ;
-      - en rang percentile EMPIRIQUE dans l'historique observé de la
-        période de référence (pas une hypothèse gaussienne).
+    The gap is quantified two ways:
+      - in standard deviations of the reference distribution (z-score
+        of the center of the projected distribution relative to mu/sigma
+        of the current climate);
+      - in EMPIRICAL percentile rank within the observed record of the
+        reference period (not a Gaussian assumption).
 
-    Retour : dict avec mu/sigma de référence, valeur centrale projetée,
-    z-score et percentiles (empirique + théorique sous loi normale).
+    Returns: dict with the reference mu/sigma, projected central value,
+    z-score and percentiles (empirical + theoretical under a normal law).
     """
     from scipy.stats import gaussian_kde, norm, percentileofscore
 
@@ -1348,9 +1350,9 @@ def plot_climate_baseline_vs_peak(gmst_df, forecast_df, residuals, enso_bounds_d
     plt.rcParams['font.family'] = 'serif'
     fig, ax = plt.subplots(figsize=(10, 5.5))
 
-    # -- Climat actuel : histogramme des observations + cloche normale ajustée --
+    # -- Current climate: histogram of observations + fitted normal bell --
     ax.hist(baseline.values, bins=18, density=True, color=COUNTERFACT, alpha=0.22, edgecolor='none',
-            label=f'Observations mensuelles {year_deb}-{year_fin} (n={len(baseline)})')
+            label=f'Monthly observations {year_deb}-{year_fin} (n={len(baseline)})')
     x_lo = min(baseline.min(), samples_peak.min()) - 0.15
     x_hi = max(baseline.max(), samples_peak.max()) + 0.15
     x_grid = np.linspace(x_lo, x_hi, 500)
@@ -1358,7 +1360,7 @@ def plot_climate_baseline_vs_peak(gmst_df, forecast_df, residuals, enso_bounds_d
     ax.plot(x_grid, bell, color=COUNTERFACT, lw=2.0,
             label=f'Current climate, fitted normal (mu={mu_b:+.2f}C, sigma={sigma_b:.2f}C)')
 
-    # -- Distribution projetée du mois de pic --
+    # -- Projected distribution for the peak month --
     kde = gaussian_kde(samples_peak)
     bw = kde.factor * samples_peak.std(ddof=1)
     grid_peak = np.linspace(samples_peak.min() - 3 * bw, samples_peak.max() + 3 * bw, 500)
@@ -1402,7 +1404,7 @@ def plot_climate_baseline_vs_peak(gmst_df, forecast_df, residuals, enso_bounds_d
     return {
         'mu_baseline': mu_b, 'sigma_baseline': sigma_b,
         'central_peak': central_peak, 'z_score': z_score,
-        'percentile_empirique_baseline': pct_rank_obs,
+        'empirical_percentile_baseline': pct_rank_obs,
         'percentile_normal_baseline': pct_rank_normal,
     }
 
@@ -1410,16 +1412,16 @@ def plot_climate_baseline_vs_peak(gmst_df, forecast_df, residuals, enso_bounds_d
 def plot_fan_chart(df, forecast_df, residuals, zoom=None,
                     percentile_bands=((5, 95), (25, 75)),
                     thresholds=(1.5, 2.0),
-                    data_sources="Données : ECMWF/Copernicus C3S — ERA5 (réf. 1850-1900)",
+                    data_sources="Data: ECMWF/Copernicus C3S - ERA5 (ref. 1850-1900)",
                     title="Global Mean Surface Temperature Anomaly (GMSTA) - probability fan chart",
                     subtitle="TESR model - empirical percentile bands (actual walk-forward residuals)",
                     filename="gmst_fan_chart.png"):
     """
-    "Fan chart" : historique observé + prédiction centrale + bandes de
-    percentiles emboîtées (ex. 5-95% et 25-75%) montrant visuellement les
-    DEUX EXTRÊMES plausibles de la prévision à chaque mois, construites à
-    partir des résidus walk-forward réels du modèle (pas une hypothèse
-    gaussienne symétrique).
+    "Fan chart": observed history + central prediction + nested
+    probability percentiles (e.g. 5-95% and 25-75%) visually showing
+    the TWO plausible EXTREMES of the forecast at each month, built
+    from the model's real walk-forward residuals (not a symmetric
+    Gaussian assumption).
     """
     plt.rcParams['font.family'] = 'serif'
     fig, ax = plt.subplots(figsize=(13, 6.5))
@@ -1443,15 +1445,15 @@ def plot_fan_chart(df, forecast_df, residuals, zoom=None,
         high = np.array([last_obs_val] + [np.percentile(v + residuals, p_high)
                                            for v in forecast_df['gmst_anom_pred_preind']])
         ax.fill_between(fc_dates, low, high, color=color, alpha=1.0,
-                         label=f'Bande {p_low}-{p_high}%', lw=0)
+                         label=f'Band {p_low}-{p_high}%', lw=0)
 
     ax.plot(fc_dates, central_vals, 'o--', color=FACTUAL, lw=1.8, ms=4.5,
             label='Central prediction')
 
     threshold_styles = {1.5: (':', '#888888', '+1.5 C threshold (Paris Agreement)'),
-                         2.0: ('--', '#555555', 'Seuil +2 °C')}
+                         2.0: ('--', '#555555', '+2 °C threshold')}
     for th in thresholds:
-        ls, col, lab = threshold_styles.get(th, ('-.', '#999999', f'Seuil +{th} °C'))
+        ls, col, lab = threshold_styles.get(th, ('-.', '#999999', f'+{th} °C threshold'))
         ax.axhline(th, color=col, linestyle=ls, lw=1.1, label=lab)
 
     if zoom is not None:
@@ -1478,15 +1480,15 @@ def plot_fan_chart(df, forecast_df, residuals, zoom=None,
 
 
 def plot_monthly_table(synthesis_df,
-                        data_sources="Données : ECMWF/Copernicus C3S — ERA5 (réf. 1850-1900)",
+                        data_sources="Data: ECMWF/Copernicus C3S - ERA5 (ref. 1850-1900)",
                         title="Global Mean Surface Temperature Anomaly (GMSTA)\nMonthly summary of the ENSO scenario",
                         subtitle="TESR model - extremes = empirical minimum/maximum, full spread (actual walk-forward residuals)",
                         filename="gmst_monthly_table.png"):
     """
-    Rendu "tableau" de la synthèse mensuelle (compute_forecast_synthesis) :
-    mois, prédiction centrale, les deux extrêmes (bas/haut), probabilités
-    de dépassement des seuils. Plus lisible qu'un DataFrame brut pour une
-    présentation.
+    "Table" rendering of the monthly summary (compute_forecast_synthesis):
+    month, central prediction, the two extremes (low/high), threshold-
+    exceedance probabilities. More readable than a raw DataFrame for a
+    presentation.
     """
     cols = list(synthesis_df.columns)
     n_rows = len(synthesis_df)
@@ -1495,7 +1497,7 @@ def plot_monthly_table(synthesis_df,
     fig, ax = plt.subplots(figsize=(11, fig_height))
     ax.axis('off')
 
-    col_labels = ['Mois', 'Central (°C)', 'Extreme low (C)', 'Extreme high (C)'] + \
+    col_labels = ['Month', 'Central (°C)', 'Extreme low (C)', 'Extreme high (C)'] + \
                  [f'P(> +{c.split("_")[-1]}°C)' for c in cols if c.startswith('prob_gt_')]
     cell_text = []
     for m, row in synthesis_df.iterrows():
@@ -1504,12 +1506,13 @@ def plot_monthly_table(synthesis_df,
         line += [f"{row[c]:.0f}%" for c in cols if c.startswith('prob_gt_')]
         cell_text.append(line)
 
-    # Table ancrée en haut de la zone disponible (juste sous le sous-titre),
-    # pas centrée verticalement -> évite le grand vide au-dessus.
-    # NB : bbox est en coordonnées LOCALES de l'axe (0=bas, 1=haut de l'axe).
-    # L'axe est positionné directement via set_position() (voir plus bas)
-    # plutôt que via tight_layout(), qui insérait une marge supplémentaire
-    # non désirée entre le sous-titre et le tableau.
+    # Table anchored at the top of the available area (just below the
+    # subtitle), not vertically centered -> avoids the large empty
+    # space above.
+    # NB: bbox is in the axis's LOCAL coordinates (0=bottom, 1=top of
+    # the axis). The axis is positioned directly via set_position()
+    # (see below) rather than via tight_layout(), which inserted an
+    # unwanted extra margin between the subtitle and the table.
     table_frac_height = min(0.95, (0.34 * n_rows + 0.15) / (fig_height - header_inches - 0.02))
     table = ax.table(cellText=cell_text, colLabels=col_labels,
                       bbox=[0.0, 1.0 - table_frac_height, 1.0, table_frac_height],
@@ -1532,9 +1535,9 @@ def plot_monthly_table(synthesis_df,
              color='#444444', ha='left')
     fig.text(0.98, 0.003, data_sources, fontsize=7.5, color='#666666', ha='right')
 
-    # Positionnement direct de l'axe (au lieu de tight_layout) : évite la
-    # marge automatique supplémentaire que tight_layout insérait entre le
-    # sous-titre et le haut du tableau.
+    # Direct axis positioning (instead of tight_layout): avoids the
+    # extra automatic margin that tight_layout inserted between the
+    # subtitle and the top of the table.
     top_frac = 1 - header_inches / fig_height
     ax.set_position([0.015, 0.02, 0.97, top_frac - 0.02])
     plt.savefig(filename, dpi=300)
@@ -1544,15 +1547,15 @@ def plot_monthly_table(synthesis_df,
 
 def plot_forecast(df, forecast_df, obs_future=None, title="GMST projection"):
     """
-    Affiche l'historique + la projection. Si obs_future est fourni
-    (série observed couvrant la période de projection, utile pour un
-    backtest), elle est superposée et R/RMSE sont calculés sur cette
-    période spécifique.
+    Displays the history + the projection. If obs_future is given
+    (observed series covering the projection period, useful for a
+    backtest), it is overlaid and R/RMSE are computed over that
+    specific period.
     """
     fig, ax = plt.subplots(figsize=(11, 5))
     ax.plot(df.index, df['gmst_anom_preind'], label="Observed (historical)", color="black", lw=1.1)
     ax.plot(forecast_df.index, forecast_df['gmst_anom_pred_preind'],
-            'o--', label="Projection (ENSO saisi manuellement)", color=FACTUAL)
+            'o--', label="Projection (manually entered ENSO)", color=FACTUAL)
 
     if obs_future is not None:
         common_idx = forecast_df.index.intersection(obs_future.index)
@@ -1566,7 +1569,7 @@ def plot_forecast(df, forecast_df, obs_future=None, title="GMST projection"):
                     transform=ax.transAxes, va='top',
                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.85))
 
-    ax.axhline(1.5, color='gray', linestyle=':', label='Seuil 1.5°C')
+    ax.axhline(1.5, color='gray', linestyle=':', label='1.5°C threshold')
     ax.set_ylabel("GMST anomaly (C vs 1850-1900)")
     ax.set_title(title)
     ax.legend()
@@ -1581,12 +1584,12 @@ def plot_forecast_academic(df, forecast_df, obs_future=None,
                             subtitle="ERA5 observations and statistical projection (quadratic trend + Nino 3.4 ENSO, optimal lag)",
                             scenario_warning=None):
     """
-    Version présentation/publication du graphique de projection :
-    - typographie serif, habillage sobre
-    - titre + sous-titre méthodologique
-    - crédit auteur et source des données en pied de figure
-    - annotation optionnelle si le scénario ENSO saisi sort de la plage
-      historiquement observed (scenario_warning : str ou None)
+    Presentation/publication version of the projection chart:
+    - serif typography, understated styling
+    - methodological title + subtitle
+    - author credit and data source in the figure footer
+    - optional annotation if the entered ENSO scenario is outside the
+      historically observed range (scenario_warning: str or None)
     """
     plt.rcParams['font.family'] = 'serif'
 
@@ -1612,7 +1615,7 @@ def plot_forecast_academic(df, forecast_df, obs_future=None,
                     bbox=dict(boxstyle='round', facecolor='white',
                               edgecolor='#888888', alpha=0.9))
 
-    ax.axhline(1.5, color='#888888', linestyle=':', lw=1, label='Seuil +1.5°C (Accord de Paris)')
+    ax.axhline(1.5, color='#888888', linestyle=':', lw=1, label='+1.5°C threshold (Paris Agreement)')
 
     if scenario_warning:
         ax.text(0.985, 0.04, scenario_warning, transform=ax.transAxes,
@@ -1640,18 +1643,18 @@ def plot_forecast_academic(df, forecast_df, obs_future=None,
 
 def load_cfsv2_forecast(path_nc, target_start=None):
     """
-    Charge un fichier CPC CFSv2 'nino34Mon.nc' (monitoring/prévision ENSO).
-    Structure : anom(ens, time, lev, lat, lon), ens=1..40 = runs du modèle
-    (du plus récent au plus ancien), ens=41 = observation ; time couvre
-    à la fois l'historique récent et la période de prévision.
-    Retourne un DataFrame [date, ens_mean, ens_std] limité à la période
-    de prévision (target_start, par défaut : aujourd'hui + 1 mois).
+    Loads a CPC CFSv2 'nino34Mon.nc' file (ENSO monitoring/forecast).
+    Structure: anom(ens, time, lev, lat, lon), ens=1..40 = model runs
+    (most recent to oldest), ens=41 = observation; time covers both
+    the recent history and the forecast period.
+    Returns a DataFrame [date, ens_mean, ens_std] limited to the
+    forecast period (target_start, default: today + 1 month).
     """
     import netCDF4 as nc
     from datetime import datetime, timedelta
 
     ds = nc.Dataset(path_nc)
-    time_units = ds.variables['time'].units  # ex : 'days since 2021-01-01, 00:00:00'
+    time_units = ds.variables['time'].units  # e.g. 'days since 2021-01-01, 00:00:00'
     base_str = time_units.split('since')[1].strip().split(',')[0].strip()
     base_date = datetime.strptime(base_str, '%Y-%m-%d')
     dates = [base_date + timedelta(days=float(t)) for t in ds.variables['time'][:]]
@@ -1671,11 +1674,11 @@ def load_cfsv2_forecast(path_nc, target_start=None):
 
 def build_bias_corrected_scenario(cfs_df, target_peak):
     """
-    Construit un scénario ENSO à partir de la forme du forecast CFSv2 brut,
-    mais rééchelonné pour atteindre un pic donné (target_peak). Utile pour
-    représenter la correction de biais connue du CFSv2 (le brut surestime
-    généralement l'amplitude Niño3.4 par rapport aux versions post-traitées
-    du CPC/NOAA).
+    Builds an ENSO scenario from the shape of the raw CFSv2 forecast,
+    but rescaled to reach a given peak (target_peak). Useful for
+    representing the CFSv2's known bias correction (the raw output
+    generally overestimates Nino3.4 amplitude compared to the CPC/NOAA
+    post-processed versions).
     """
     scale = target_peak / cfs_df['ens_mean'].max()
     return (cfs_df['ens_mean'] * scale).tolist()
@@ -1686,15 +1689,15 @@ def plot_enso_peak_distribution(members_weighted, target_month_label, peak_media
                                  data_sources="Data: Climate Dashboard (multi-model ONI/Nino 3.4), SINTEX-F excluded",
                                  filename="enso_distribution_peak.png"):
     """
-    Histogramme pondéré (poids égal par modèle) de la distribution ONI/
-    Niño 3.4 au mois de paroxysme du scénario, en classes de largeur
-    `bin_width` (0.2°C par défaut). SINTEX-F déjà exclu en amont
+    Weighted histogram (equal weight per model) of the ONI/Nino 3.4
+    distribution at the scenario's peak month, in bins of width
+    `bin_width` (0.2C by default). SINTEX-F already excluded upstream
     (load_enso_dashboard_members).
 
-    `init_date` : date d'initialisation du scénario multi-modèle
-    (Climate Dashboard), reportée dans le sous-titre descriptif de la
-    figure pour qu'un lecteur puisse situer la prévision sans se reporter
-    au texte principal.
+    `init_date`: initialization date of the multi-model scenario
+    (Climate Dashboard), reported in the figure's descriptive subtitle
+    so that a reader can place the forecast without referring back to
+    the main text.
     """
     vals = members_weighted['anomaly_c'].values
     wts = members_weighted['weight'].values
@@ -1726,7 +1729,7 @@ def plot_enso_peak_distribution(members_weighted, target_month_label, peak_media
 
     ax.axvline(peak_median, color='#1a1a1a', ls='--', lw=1.3,
                label=f"Multi-model median: {peak_median:+.2f}C")
-    ax.set_xlabel(f"Indice ONI / Niño 3.4 ({target_month_label}, °C)", fontsize=11)
+    ax.set_xlabel(f"ONI / Nino 3.4 index ({target_month_label}, °C)", fontsize=11)
     ax.set_ylabel("Share of members (%, equal weight per model)", fontsize=11)
     ax.grid(True, axis='y', alpha=0.25, lw=0.6)
     for spine in ['top', 'right']:
@@ -1771,10 +1774,10 @@ def plot_multi_scenario(df, scenarios,                         data_sources="Dat
                          subtitle="ERA5 observations and statistical projections (quadratic trend + Nino 3.4 ENSO)",
                          scenario_warning=None):
     """
-    Affiche l'historique + plusieurs scénarios de projection en courbes
-    continues (pas de marqueurs) sur le même graphique.
+    Displays the history + several projection scenarios as continuous
+    curves (no markers) on the same chart.
 
-    scenarios : dict {label: (forecast_df, couleur)}
+    scenarios: dict {label: (forecast_df, color)}
     """
     plt.rcParams['font.family'] = 'serif'
     fig, ax = plt.subplots(figsize=(12, 6.5))
@@ -1786,7 +1789,7 @@ def plot_multi_scenario(df, scenarios,                         data_sources="Dat
         ax.plot(fc.index, fc['gmst_anom_pred_preind'], '-', color=color, lw=2,
                 label=label)
 
-    ax.axhline(1.5, color='#888888', linestyle=':', lw=1, label='Seuil +1.5°C (Accord de Paris)')
+    ax.axhline(1.5, color='#888888', linestyle=':', lw=1, label='+1.5°C threshold (Paris Agreement)')
 
     if scenario_warning:
         ax.text(0.985, 0.03, scenario_warning, transform=ax.transAxes,
@@ -1813,8 +1816,8 @@ def plot_multi_scenario(df, scenarios,                         data_sources="Dat
 
 
 # ----------------------------------------------------------------------
-# 5bis. GRAPHIQUE AVEC ZOOM TEMPOREL + JONCTION SANS SAUT
-#       (vérif. seule, prévision seule, ou mix vérif/prévision)
+# 5bis. CHART WITH TIME ZOOM + SEAMLESS JUNCTION
+#       (verification only, forecast only, or verification/forecast mix)
 # ----------------------------------------------------------------------
 
 import matplotlib.dates as mdates
@@ -1848,57 +1851,59 @@ def plot_forecast_zoom(df, forecast_df=None, obs_future=None, zoom=None,
                         legend_loc='lower left',
                         scenario_warning=None):
     """
-    Graphique combiné verification / prévision, avec zoom temporel optionnel
-    et jonction sans saut entre les courbes.
+    Combined verification/forecast chart, with optional time zoom and
+    seamless junction between the curves.
 
-    Paramètres
+    Parameters
     ----------
-    df : DataFrame historique observé, colonne 'gmst_anom_preind' (obligatoire)
-    forecast_df : DataFrame de projection (colonne 'gmst_anom_pred_preind'),
-                  ou None si on ne veut que la verification
-    obs_future : Series des observations réelles couvrant tout ou partie de
-                 la période de forecast_df (mode "verification"). Si fournie
-                 en même temps que forecast_df, les deux courbes sont
-                 superposées sur le même graphique (mode "mix").
-    model_fit : Series optionnelle des valeurs du modèle AJUSTÉ sur
-                l'historique (model.predict(X), même index que df).
-                Superpose "model vs observed" sur les mois passés pour une
-                verification directe (indépendante de la prévision future).
-    forecast_std : écart-type (float, ex. le RMSE du modèle) pour tracer une
-                   enveloppe d'incertitude ombrée simple (±1 écart-type)
-                   autour de forecast_df. Ignoré si `residuals` est fourni
-                   (les bandes de percentiles empiriques sont préférées,
-                   plus honnêtes qu'une hypothèse gaussienne symétrique).
-    residuals : array des résidus walk-forward réels (obs - prédit). Si
-                fourni, remplace l'enveloppe simple par des bandes de
-                percentiles empiriques (voir percentile_bands) -- montre
-                les deux extrêmes réels de la prévision, pas juste ±1σ.
-    percentile_bands : tuple de paires (p_bas, p_haut) à tracer en bandes
-                        emboîtées si `residuals` est fourni. Par défaut
-                        (5,95) et (25,75).
-    forecast_df_alt : DataFrame optionnel d'un second scénario (ex. version
-                      révisée) à superposer en trait fin pour comparaison
-                      directe avec forecast_df (label_alt : sa légende).
-    zoom : tuple (date_debut, date_fin) ex. ("2022-01-01", "2027-03-01").
-           Si fourni, l'axe x est zoomé sur cette période avec un repère
-           mensuel explicite (mois par mois).
-    thresholds : seuils horizontaux à tracer, par défaut +1.5°C et +2°C.
-    legend_loc : position de la légende (par défaut 'lower left'). Valeur
-                 spéciale 'between_thresholds' : cale la légende à gauche,
-                 verticalement centrée entre les deux seuils (utile quand
-                 les seuils +1.5/+2°C sont hauts dans le cadrage du zoom).
-    scenario_warning : texte d'avertissement optionnel (ex. scénario ENSO
-                       hors de la plage historique -> extrapolation).
+    df : observed historical DataFrame, column 'gmst_anom_preind' (required)
+    forecast_df : projection DataFrame (column 'gmst_anom_pred_preind'),
+                  or None if only verification is wanted
+    obs_future : Series of real observations covering all or part of
+                 forecast_df's period ("verification" mode). If given
+                 together with forecast_df, the two curves are
+                 overlaid on the same chart ("mix" mode).
+    model_fit : optional Series of the values of the model FITTED on
+                the history (model.predict(X), same index as df).
+                Overlays "model vs observed" for past months for a
+                direct verification (independent of the future forecast).
+    forecast_std : standard deviation (float, e.g. the model's RMSE) to
+                   draw a simple shaded uncertainty envelope (+/-1 std
+                   dev) around forecast_df. Ignored if `residuals` is
+                   provided (empirical percentile bands are preferred,
+                   more honest than a symmetric Gaussian assumption).
+    residuals : array of the real walk-forward residuals (obs -
+                predicted). If provided, replaces the simple envelope
+                with empirical percentile bands (see percentile_bands)
+                -- shows the two real extremes of the forecast, not
+                just +/-1 sigma.
+    percentile_bands : tuple of (p_low, p_high) pairs to plot as nested
+                        bands if `residuals` is provided. Default
+                        (5,95) and (25,75).
+    forecast_df_alt : optional DataFrame of a second scenario (e.g. a
+                      revised version) to overlay as a thin line for
+                      direct comparison with forecast_df (label_alt:
+                      its legend label).
+    zoom : tuple (start_date, end_date) e.g. ("2022-01-01", "2027-03-01").
+           If provided, the x-axis is zoomed on this period with an
+           explicit monthly tick spacing (month by month).
+    thresholds : horizontal thresholds to plot, +1.5°C and +2°C by default.
+    legend_loc : legend position (default 'lower left'). Special value
+                 'between_thresholds': anchors the legend on the left,
+                 vertically centred between the two thresholds (useful
+                 when the +1.5/+2°C thresholds are high in the zoom framing).
+    scenario_warning : optional warning text (e.g. ENSO scenario
+                       outside the historical range -> extrapolation).
 
-    Jonction sans saut
-    ------------------
-    Le dernier point observé de `df` est répété comme premier point de
-    chaque courbe de projection/verification, ce qui relie visuellement
-    l'historique et la suite (plus de "branche vide" entre les deux).
+    Seamless junction
+    -----------------
+    The last observed point of `df` is repeated as the first point of
+    each projection/verification curve, which visually connects the
+    history and what follows (no more "empty gap" between the two).
     """
     plt.rcParams['font.family'] = 'serif'
 
-    # largeur adaptative si zoom mensuel sur une longue période (lisibilité)
+    # adaptive width for a monthly zoom over a long period (readability)
     fig_width = 12
     if zoom is not None:
         n_months_zoom = (pd.to_datetime(zoom[1]).year - pd.to_datetime(zoom[0]).year) * 12 + \
@@ -1909,7 +1914,7 @@ def plot_forecast_zoom(df, forecast_df=None, obs_future=None, zoom=None,
     ax.plot(df.index, df['gmst_anom_preind'], color='#1a1a1a', lw=1.3,
             label='Observed (ERA5, 1850-1900 baseline)')
 
-    # -- Vérification modèle vs obs sur l'historique (indépendant du futur) --
+    # -- Model vs obs verification on the history (independent of the future) --
     if model_fit is not None:
         ax.plot(model_fit.index, model_fit.values, color=HIGHLIGHT, lw=1.2,
                 linestyle='-', alpha=0.85,
@@ -1928,15 +1933,15 @@ def plot_forecast_zoom(df, forecast_df=None, obs_future=None, zoom=None,
 
     warmest_date, warmest_val = None, -np.inf
 
-    # -- Courbe de prévision, jointe au dernier point observé --
+    # -- Forecast curve, joined to the last observed point --
     if forecast_df is not None:
         fc_dates = [last_obs_date] + list(forecast_df.index)
         fc_vals = [last_obs_val] + list(forecast_df['gmst_anom_pred_preind'])
 
         if residuals is not None:
-            # Bandes de percentiles empiriques (résidus walk-forward réels)
-            # -- montre les DEUX EXTRÊMES réels, pas une hypothèse gaussienne.
-            # Part à largeur nulle sur le dernier point observé (pas de saut).
+            # Empirical percentile bands (real walk-forward residuals)
+            # -- shows the two REAL extremes, not a Gaussian assumption.
+            # Starts at zero width on the last observed point (no jump).
             n_bands = len(percentile_bands)
             band_colors = [overview_band_color(i, n_bands) for i in range(n_bands)]
             for (p_low, p_high), color in zip(percentile_bands, band_colors):
@@ -1947,8 +1952,8 @@ def plot_forecast_zoom(df, forecast_df=None, obs_future=None, zoom=None,
                 ax.fill_between(fc_dates, low, high, color=color, alpha=1.0, lw=0,
                                  label=f'Band {p_low}-{p_high}% (empirical extremes)')
         elif forecast_std is not None:
-            # l'enveloppe part à largeur nulle sur le dernier point observé
-            # (jonction sans saut), puis s'élargit à ±forecast_std
+            # the envelope starts at zero width on the last observed point
+            # (seamless junction), then widens to +/-forecast_std
             std_arr = np.array([0.0] + [forecast_std] * len(forecast_df))
             fc_vals_arr = np.array(fc_vals)
             ax.fill_between(fc_dates, fc_vals_arr - std_arr, fc_vals_arr + std_arr,
@@ -1963,7 +1968,7 @@ def plot_forecast_zoom(df, forecast_df=None, obs_future=None, zoom=None,
             warmest_val = forecast_df['gmst_anom_pred_preind'].iloc[i_max]
             warmest_date = forecast_df.index[i_max]
 
-    # -- Second scénario optionnel (ex. version révisée), pour comparaison --
+    # -- Optional second scenario (e.g. revised version), for comparison --
     if forecast_df_alt is not None:
         fc_alt_dates = [last_obs_date] + list(forecast_df_alt.index)
         fc_alt_vals = [last_obs_val] + list(forecast_df_alt['gmst_anom_pred_preind'])
@@ -2020,11 +2025,11 @@ def plot_forecast_zoom(df, forecast_df=None, obs_future=None, zoom=None,
             bbox=dict(boxstyle='round', facecolor=WARNING_BG,
                           edgecolor=FACTUAL, linewidth=0.8))
 
-    # -- Seuils --
+    # -- Thresholds --
     threshold_styles = {1.5: (':', '#888888', '+1.5 C threshold (Paris Agreement)'),
-                         2.0: ('--', '#555555', 'Seuil +2 °C')}
+                         2.0: ('--', '#555555', '+2 °C threshold')}
     for th in thresholds:
-        ls, col, lab = threshold_styles.get(th, ('-.', '#999999', f'Seuil +{th} °C'))
+        ls, col, lab = threshold_styles.get(th, ('-.', '#999999', f'+{th} °C threshold'))
         ax.axhline(th, color=col, linestyle=ls, lw=1.1, label=lab)
 
     if scenario_warning:
@@ -2176,15 +2181,15 @@ def plot_forecast_overview_media(df, forecast_df, residuals=None,
     def _to_frac(y_data):
         return (y_data - ylim_bot) / (ylim_top - ylim_bot)
 
-    # -- Seuils, étiquetés à GAUCHE de la ligne (comme la référence media) --
+    # -- Thresholds, labeled to the LEFT of the line (as in the media reference) --
     #    plutôt qu'à droite : la zone de droite est déjà dense (fin de
     #    l'historique + toute la projection compressée sur ~1% de l'axe
     #    des dates, cf. note plus bas) --
-    threshold_labels = {1.5: '+1.5 C threshold (Paris Agreement)', 2.0: 'Seuil +2 °C'}
+    threshold_labels = {1.5: '+1.5 C threshold (Paris Agreement)', 2.0: '+2 °C threshold'}
     x_left = df.index[int(len(df) * 0.012)]
     for th in thresholds:
         ax.axhline(th, color='#999999', linestyle=(0, (1, 2)), lw=1.0, zorder=1)
-        ax.text(x_left, th + 0.025, threshold_labels.get(th, f'Seuil +{th} °C'),
+        ax.text(x_left, th + 0.025, threshold_labels.get(th, f'+{th} °C threshold'),
                 ha='left', va='bottom', fontsize=9.5, color='#777777')
     ax.text(x_left, record_val + 0.025,
             f"Observed record: {_month_label(record_date)} ({record_val:+.2f} C)",
@@ -2392,7 +2397,7 @@ def plot_enso_scenario_envelope(enveloppe_enso, enso_hist_df=None, obs_junction=
     ax.text(pd.Timestamp('2027-08-15'), 0.985, 'H2 extension', transform=ax.get_xaxis_transform(),
             ha='center', va='top', fontsize=9, fontweight='bold', color='#333333')
 
-    # -- Seuils ENSO / catégories d'intensité (étiquettes au bord droit,
+    # -- ENSO thresholds / intensity categories (labels on the right edge,
     #    pas dans la légende, pour ne pas la surcharger) --
     if show_thresholds:
         thresholds = [
@@ -3968,7 +3973,7 @@ if __name__ == "__main__":
     ax.fill_between(decomp.index, forecast_neutral['gmst_anom_pred_preind'], decomp['total'],
                      color=HIGHLIGHT, alpha=0.12, lw=0, zorder=2.8)
     ax.axhline(1.5, color='gray', ls=':', lw=1, label='+1.5C threshold (Paris Agreement)')
-    ax.axhline(2.0, color='gray', ls='--', lw=1, label='Seuil +2°C')
+    ax.axhline(2.0, color='gray', ls='--', lw=1, label='+2°C threshold')
     # -- Marge explicite incluant l'enveloppe ENSO --
     y_top_data = max(decomp['total'].max(), 2.0, env['q100'].max())
     y_bottom_data = min(forecast_neutral['gmst_anom_pred_preind'].min(), env['q0'].min())
