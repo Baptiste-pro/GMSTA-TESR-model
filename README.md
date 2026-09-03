@@ -64,7 +64,7 @@ The repository is intended for research and reproducibility purposes and does no
 
 If you use this code or data, please cite the accompanying EGU preprint:
 
-> Boussemart, B.: Quantifying the impact of a projected Record-Breaking 2026-2027 El Niño on Global Temperatures using a Statistical Model, EGUsphere [preprint], https://doi.org//egusphere-2026-5348, 2026.
+> Boussemart, B.: Quantifying the impact of a projected Record-Breaking 2026-2027 El Niño on Global Temperatures using a Statistical Model, EGUsphere [preprint], https://doi.org/10.5194/egusphere-2026-5348, 2026.
 
 The archived version of this repository is available at:
 https://doi.org/10.5281/zenodo.22287254
