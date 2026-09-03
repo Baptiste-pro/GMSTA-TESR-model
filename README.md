@@ -20,6 +20,9 @@ Code and data processing scripts for the TESR statistical model used to quantify
 - `code/palette.py`  
   Shared colour palettes and plotting settings used to ensure consistent and accessible figure styling.
 
+- `code/plot_extensions_2027.py`  
+  Analysis and visualization of extended H2 2027 hypothesis used in the study.
+  
 ### Bias and sensitivity analysis
 
 - `code/run_bias_sensitivity_real.py`  
