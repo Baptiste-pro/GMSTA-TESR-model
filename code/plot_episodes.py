@@ -1,37 +1,9 @@
 """
-plot_episodes_v5.py
+Author: Baptiste Boussemart
 
-Reprend v4 (barres d'erreur IC 90% par bootstrap par blocs mobiles) et
-ajoute 3 choses :
-
-  1. Un TABLEAU mensuel détaillé (même esprit visuel que le tableau déjà
-     utilisé pour la prévision 2026-2027 dans enso_gmst_model.py) pour
-     CHAQUE épisode -- 1982-1983, 1997-1998, 2015-2016 ET la projection
-     2026-2027 -- via plot_monthly_attribution_table(). Facile d'en
-     ajouter d'autres : il suffit d'ajouter une entrée dans
-     `episodes_hist` de build_pipeline().
-
-  2. Une ligne de VÉRIFICATION (observation ERA5/C3S réellement mesurée,
-     en noir) superposée à la prédiction du modèle dans les graphiques
-     scénario-vs-contrefactuel (plot_scenario_vs_contrefactuel_single),
-     pour les mois déjà observés. Pour les mois encore purs prévision
-     (fin de l'épisode 2026-2027), la ligne stops simplement --
-     get_verification() renvoie NaN pour ces mois, cf. sa docstring.
-
-  3. Le calcul de l'écart verification - modèle, dénoté "variabilité
-     externe à l'ENSO" (i.e. non capturée par tendance+ENSO+saisonnier :
-     volcanisme, PDO/AMO, autre bruit interne -- cf. limites du modèle
-     documentées dans enso_gmst_model.py). Cet écart est :
-       - moyenné par épisode et ajouté comme 4e barre (+ 4e colonne %)
-         dans plot_bar_comparatif_moyenne et plot_bar_pourcentage ;
-       - détaillé mois par mois dans le nouveau tableau (colonnes
-         "External variability (C)" et "(%)").
-     ATTENTION (à garder pour le manuscrit) : ce n'est PAS une
-     incertitude du modèle comme les IC bootstrap -- c'est un résidu
-     déterministe (observé - prédit), calculable UNIQUEMENT sur les mois
-     déjà observés. Pour 2026-2027, la moyenne ne porte donc que sur les
-     quelques mois déjà connus au moment du run (pas d'extrapolation).
+plot_episodes.py
 """
+
 import os
 import sys
 import textwrap
@@ -58,9 +30,20 @@ from palette import (
 # Default input paths: point these at your own local ERA5/C3S GMST,
 # Nino 3.4 and ENSO-dashboard-members CSVs (see README for the expected
 # format of each file), or override via environment variables.
-DEFAULT_PATH_GMST = os.environ.get("TESR_PATH_GMST", "C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/era5_gmst_c3s.csv")
-DEFAULT_PATH_ENSO = os.environ.get("TESR_PATH_ENSO", "C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/nino34.csv")
-DEFAULT_PATH_ENSO_MEMBERS = os.environ.get("TESR_PATH_ENSO_MEMBERS", "C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/enso_members_oni.csv")
+DEFAULT_PATH_GMST = os.environ.get(
+    "TESR_PATH_GMST",
+    "data/era5_gmst_c3s.csv"
+)
+
+DEFAULT_PATH_ENSO = os.environ.get(
+    "TESR_PATH_ENSO",
+    "data/nino34_anomaly.csv"
+)
+
+DEFAULT_PATH_ENSO_MEMBERS = os.environ.get(
+    "TESR_PATH_ENSO_MEMBERS",
+    "data/enso_members_oni.csv"
+)
 
 COLOR_TREND = FACTUAL_DARK
 COLOR_ENSO = HIGHLIGHT
@@ -100,11 +83,11 @@ def build_pipeline(path_gmst=DEFAULT_PATH_GMST, path_enso=DEFAULT_PATH_ENSO,
         input_end = pd.Timestamp(f"{start_year + 1}-03-01")
         calendars[label] = enso_df['enso_ssta'].loc[input_start:input_end]
 
-    # Scénario ENSO recalibré dynamiquement sur enso_members_oni.csv (au lieu
-    # d'une liste figée) -- même logique que enso_gmst_model.py : juillet
-    # 2026 = point de jonction déterministe observé (ONI), août 2026 -> avril
-    # 2027 = mediane multi-modèles pondérée par modèle, SINTEX-F exclu.
-    JUILLET_OBS_ONI = 2.03  # ONI observé juillet 2026 (Climate Dashboard)
+    # ENSO scenario dynamically recalibrated using enso_members_oni.csv (instead
+    # of a fixed list) — same logic as enso_gmst_model.py: July
+    # 2026 = observed deterministic transition point (ONI), August 2026 → April
+    # 2027 = model-weighted multi-model median, excluding SINTEX-F.
+    JUILLET_OBS_ONI = 2.03  # Observed ONI for July 2026 (The Climate Brink ENSO Dashboard)
     enveloppe_enso = load_enso_dashboard_scenario(path_enso_members, exclude_models=('SINTEX-F',))
     enso_c3s_median_brut = pd.concat([
         pd.Series([JUILLET_OBS_ONI], index=pd.to_datetime(["2026-07-01"])),
@@ -119,33 +102,33 @@ def build_pipeline(path_gmst=DEFAULT_PATH_GMST, path_enso=DEFAULT_PATH_ENSO,
                for l, cal in calendars.items()}
 
     # ------------------------------------------------------------------
-    # ENVELOPPE D'INCERTITUDE COMBINÉE : dispersion multi-modèles ENSO
-    # (Q0-Q100, Q05-Q95, Q25-Q75, tirées de enveloppe_enso) EMPILÉE avec
-    # l'incertitude PROPRE au modèle TESR (bootstrap par blocs mobiles).
-    # Il ne suffit pas de faire tourner le modèle central sur un scénario
-    # ENSO extrême : ça donne une prédiction ponctuelle, pas une borne --
-    # il faut aussi la marge d'incertitude du modèle À CE scénario. On
-    # bootstrappe donc CHAQUE borne (300 réplicats/borne, ~0,7s chacun),
-    # et on prend la queue du bootstrap du côté pertinent : P5 du bootstrap
-    # sous le scénario ENSO bas pour la borne basse, P95 du bootstrap sous
-    # le scénario ENSO haut pour la borne haute. Juillet reste fixé à la
-    # valeur observed (JUILLET_OBS_ONI) dans toutes les bandes -- pas
-    # d'incertitude sur un mois déjà mesuré. Uniquement disponible pour
-    # "2026-2027 (projection)" : les épisodes historiques ont un ENSO
-    # observé, sans dispersion multi-modèles à propager.
+    # COMBINED UNCERTAINTY ENVELOPE: ENSO multi-model dispersion
+    # (Q0–Q100, Q05–Q95, Q25–Q75, taken from ‘envelope_enso’) STACKED with
+    # the TESR model’s INHERENT uncertainty (moving-block bootstrap).
+    # It is not enough simply to run the central model on an
+    # extreme ENSO scenario: this yields a point forecast, not a range --
+    # we also need the model’s margin of uncertainty FOR THAT scenario. We
+    # therefore bootstrap EACH bound (300 replicates per bound, ~0.7s each),
+    # and take the tail of the bootstrap on the relevant side: the P5 of the bootstrap
+    # under the low ENSO scenario for the lower bound, the P95 of the bootstrap under
+    # the high ENSO scenario for the upper bound. July remains fixed at the
+    # observed value (JULY_OBS_ONI) in all bands — there is no
+    # uncertainty for a month that has already been measured. Only available for
+    # “2026–2027 (projection)”: historical episodes have an observed ENSO
+    # state, with no multi-model dispersion to propagate.
     #
-    # IMPORTANT -- calendrier des bandes ALIGNÉ sur celui du calendrier
-    # central (near_term_enso avril-juin PUIS jonction juillet PUIS
-    # scénario) : sans near_term_enso en tête, bootstrap_episode_raw
-    # décale son calendrier de +lag (3 mois) et ne produit ses premières
-    # bornes qu'à partir d'octobre 2026, alors que la courbe centrale
-    # (decomps["2026-2027 (projection)"]) démarre dès juillet 2026 --
-    # l'enveloppe tracée aurait alors un trou de 3 mois (juillet-septembre
-    # sans bande visible) avant de rattraper la courbe centrale. Avril-juin
-    # étant déjà observé (donc identique dans toutes les bandes), l'ajouter
-    # ne crée aucune dispersion artificielle sur cette période : seule
-    # l'incertitude propre du modèle (bootstrap) y apparaît, la dispersion
-    # ENSO ne s'élargissant qu'à partir d'août 2026 (scénario multi-modèles).
+    # IMPORTANT — the time series schedule is ALIGNED with that of the
+    # central schedule (near_term_enso April–June THEN July junction THEN
+    # scenario): without near_term_enso at the start, bootstrap_episode_raw
+    # shifts its timeline by +lag (3 months) and does not produce its first
+    # bounds until October 2026, whereas the central curve
+    # (decomps[‘2026–2027 (projection)’]) starts as early as July 2026 --
+    # the plotted envelope would then have a 3-month gap (July–September
+    # with no visible band) before catching up with the central curve. As April–June
+    # are already observed (and therefore identical across all bands), adding them
+    # creates no artificial dispersion over this period: only
+    # the model’s own uncertainty (bootstrap) appears there; the
+    # ENSO dispersion only widens from August 2026 onwards (multi-model scenario).
     # ------------------------------------------------------------------
     enso_bands_brut = {}
     for col in ('p25', 'p75', 'p05', 'p95', 'q0', 'q100'):
@@ -160,8 +143,8 @@ def build_pipeline(path_gmst=DEFAULT_PATH_GMST, path_enso=DEFAULT_PATH_ENSO,
     for col, cal in enso_bands.items():
         raw_b = bootstrap_episode_raw(model, feature_cols, X_train, y_train, dataset, lag, cal, n_boot=300)
         enso_bootstrap_bands[col] = dict(
-            ci_monthly=ci_all_dates(raw_b),      # -> total_p5/p50/p95 par mois
-            ci_mean=ci_mean_over_episode(raw_b),  # -> IC 90% de la moyenne épisode (barres attribution)
+            ci_monthly=ci_all_dates(raw_b),      # -> total_p5/p50/p95 per month
+            ci_mean=ci_mean_over_episode(raw_b),  # -> IC 90% of the episode mean
             decomp_central=decompose_forecast_enso_calendar(model, feature_cols, dataset, lag, cal),
         )
     enso_uncertainty = {"2026-2027 (projection)": enso_bootstrap_bands}
@@ -173,36 +156,37 @@ def build_pipeline(path_gmst=DEFAULT_PATH_GMST, path_enso=DEFAULT_PATH_ENSO,
 
 
 # ----------------------------------------------------------------------
-# 1bis. VÉRIFICATION vs MODÈLE -- "ENSO-external variability"
+# 1a. VERIFICATION vs MODEL -- “ENSO-external variability”
 # ----------------------------------------------------------------------
+
 def get_verification(gmst_df, decomp):
     """
-    Aligne les valeurs GMST RÉELLEMENT OBSERVÉES (ERA5/C3S, colonne
-    'gmst_anom_preind') sur l'index de date cible d'une décomposition
-    d'épisode. Pour les épisodes historiques (82/83, 97/98, 15/16), tous
-    les mois sont observés. Pour la projection 2026-2027, seuls les
-    premiers mois (déjà passés au moment du run) le sont -- le reste
-    renvoie NaN automatiquement via reindex(), ce qui permet à toutes
-    les fonctions en aval (courbe, tableau, barres) de distinguer
-    hindcast et pure prévision sans code spécifique par épisode.
+    Aligns the ACTUALLY OBSERVED GMST values (ERA5/C3S, column
+    “gmst_anom_preind”) with the target date index of an
+    episode decomposition. For historical episodes (82/83, 97/98, 15/16), all
+    months are observed. For the 2026–2027 projection, only the
+    first few months (which have already elapsed at the time of the run) are observed — the rest
+    automatically return NaN via reindex(), which allows all
+    downstream functions (curve, table, bars) to distinguish
+    between hindcasts and pure forecasts without the need for episode-specific code.
     """
     return gmst_df['gmst_anom_preind'].reindex(decomp.index)
 
 
 def compute_external_variability(decomp, verif):
     """
-    Écart mois par mois entre la verification (observation) et la
-    prédiction totale du modèle TESR (tendance + ENSO + saisonnier).
+    Month-on-month difference between the observed value and the
+    total forecast from the TESR model (trend + ENSO + seasonal).
 
-    Interprétation proposée pour le manuscrit : la part de l'anomalie
-    GMSTA que le modèle n'explique NI par la tendance de fond, NI par
-    ENSO (avec son interaction), NI par le cycle saisonnier résiduel --
-    donc, par construction, une variabilité EXTERNE à ces 3 facteurs
-    (volcanisme/aérosols, PDO/AMO, autre bruit interne non modélisé ;
-    cf. section "MODEL LIMITATIONS" dans enso_gmst_model.py). Ce n'est
-    PAS un intervalle d'incertitude du modèle (comme les IC bootstrap
-    des autres composantes) : c'est un résidu déterministe observé -
-    prédit, NaN tant que le mois n'est pas encore observé.
+    Proposed interpretation for the manuscript: the portion of the
+    GMSTA that the model explains NEITHER by the long-term trend, NOR by
+    ENSO (including its interaction), NOR by the residual seasonal cycle --
+    therefore, by definition, variability EXTERNAL to these three factors
+    (volcanism/aerosols, PDO/AMO, other unmodelled internal noise;
+    see the ‘MODEL LIMITATIONS’ section in enso_gmst_model.py). This is
+    NOT a model uncertainty interval (such as the bootstrap CI
+    for the other components): it is an observed deterministic residual –
+    predicted, NaN until the month has been observed.
     """
     return verif - decomp['total']
 
@@ -219,7 +203,7 @@ def _make_summary(decomps, labels, verifs=None):
         }
         if verifs is not None and l in verifs:
             ext = compute_external_variability(d, verifs[l])
-            row['ext_var'] = ext.mean(skipna=True)  # NaN si aucun mois observé
+            row['ext_var'] = ext.mean(skipna=True)  # NaN if no months observed
             row['n_obs'] = int(ext.notna().sum())
         else:
             row['ext_var'] = np.nan
@@ -234,11 +218,12 @@ def _make_summary(decomps, labels, verifs=None):
 
 
 # ----------------------------------------------------------------------
-# 2. BOOTSTRAP PAR BLOCS MOBILES -- étendu à trend/enso/seasonal/total
-#    (même principe que bootstrap_attribution_uncertainty de model.py,
-#    Künsch 1989 : ré-échantillonnage des résidus d'entraînement par
-#    blocs de 12 mois consécutifs, ré-ajustement Ridge à alpha FIXE)
+# 2. MOBILE BLOCK BOOTSTRAPPING -- extended to trend/ENSO/seasonal/total
+#    (same principle as bootstrap_attribution_uncertainty in model.py,
+#    Künsch 1989: resampling of training residuals in
+#    blocks of 12 consecutive months, Ridge re-fitting with a FIXED alpha)
 # ----------------------------------------------------------------------
+  
 def bootstrap_episode_raw(model, feature_cols, X_train, y_train, dataset, lag,
                            enso_calendar, n_boot=300, block_size=12, seed=42):
     rng = np.random.default_rng(seed)
@@ -272,9 +257,9 @@ def bootstrap_episode_raw(model, feature_cols, X_train, y_train, dataset, lag,
 
 
 def ci_mean_over_episode(raw):
-    """IC 90% (P5/P50/P95) de la MOYENNE de chaque composante sur l'épisode,
-    + des pourcentages (ratio composante/total recalculé à chaque réplique
-    avant de prendre le percentile -- pas percentile(composante)/percentile(total))."""
+    """90% CI (P5/P50/P95) of the AVERAGE of each component over the episode,
+    + the percentages (component/total ratio recalculated for each replica
+    before taking the percentile — not percentile(component)/percentile(total))."""
     out = {}
     total_mean = raw['total'].mean(axis=1)
     for comp in ['trend', 'enso', 'seasonal']:
@@ -286,10 +271,10 @@ def ci_mean_over_episode(raw):
 
 
 def ci_at_date(raw, date):
-    """IC 90% de chaque composante à une date cible précise (simplification :
-    la date est fixée au mois de paroxysme du scénario CENTRAL -- elle n'est
-    pas recalculée par réplique bootstrap, ce qui reviendrait à un exercice
-    bien plus lourd sans changer qualitativement le résultat)."""
+    """90% CI for each component at a specific target date (for simplicity:
+    the date is set as the month of peak in the CENTRAL scenario — it is
+    not recalculated via bootstrap replication, which would result in a
+    much more resource-intensive exercise without qualitatively changing the result)."""
     idx = list(raw['target_dates']).index(pd.Timestamp(date))
     out = {}
     total_at = raw['total'][:, idx]
@@ -302,11 +287,11 @@ def ci_at_date(raw, date):
 
 
 def ci_all_dates(raw):
-    """IC 90% (P5/P50/P95) de chaque composante ET du total/contrefactuel,
-    calculé À CHAQUE MOIS de l'épisode. Le contrefactuel (trend+seasonal)
-    est recalculé réplique par réplique AVANT de prendre les percentiles
-    (pas somme des percentiles individuels, qui différerait à cause de la
-    corrélation entre trend et seasonal au sein d'une même réplique)."""
+    """90% CI (P5/P50/P95) for each component AND for the total/counterfactual,
+    calculated EVERY MONTH during the episode. The counterfactual (trend + seasonal)
+    is recalculated replica by replica BEFORE the percentiles are taken
+    (not the sum of the individual percentiles, which would differ due to the
+    correlation between trend and seasonal within the same replica)."""
     dates = pd.DatetimeIndex(raw['target_dates'])
     total = raw['total']
     contrefactuel_boot = raw['trend'] + raw['seasonal']  # réplique par réplique
@@ -318,7 +303,7 @@ def ci_all_dates(raw):
         pct = 100 * arr / total
         pp5, pp50, pp95 = np.percentile(pct, [5, 50, 95], axis=0)
         out[f'{comp}_pct_p5'], out[f'{comp}_pct_p50'], out[f'{comp}_pct_p95'] = pp5, pp50, pp95
-    # -- Ajouts pour les barres d'erreur sur les courbes modèle/contrefactuel --
+    # -- Additions regarding error bars on model and counterfactual curves --
     out['total_p5'], out['total_p50'], out['total_p95'] = np.percentile(total, [5, 50, 95], axis=0)
     out['contrefactuel_p5'], out['contrefactuel_p50'], out['contrefactuel_p95'] = \
         np.percentile(contrefactuel_boot, [5, 50, 95], axis=0)
@@ -326,18 +311,18 @@ def ci_all_dates(raw):
 
 
 def _err_from_ci(center, ci_lo_mid_hi):
-    """Convertit (p5, p50, p95) + valeur centrale (estimation ponctuelle,
-    hors bootstrap) en (erreur_basse, erreur_haute) POSITIVES pour
-    matplotlib errorbar, ancrées sur la valeur centrale (pas sur la
-    mediane bootstrap, qui peut légèrement différer)."""
+    """Converts (p5, p50, p95) + the central value (point estimate,
+    excluding bootstrap) into POSITIVE (lower_error, upper_error) values for
+    matplotlib errorbars, centred on the central value (not on the
+    bootstrap median, which may differ slightly)."""
     p5, _, p95 = ci_lo_mid_hi
     lo = max(0.0, center - p5)
     hi = max(0.0, p95 - center)
     return lo, hi
 
 def _err_from_ci_series(center, p5, p95):
-    """Version vectorisée de _err_from_ci : (lo, hi) positifs par point,
-    ancrés sur la valeur centrale ponctuelle (pas la mediane bootstrap)."""
+    """Vectorised version of _err_from_ci: positive (lo, hi) values per point,
+    anchored to the central point value (not the bootstrap median)."""
     lo = np.maximum(0.0, center.values - p5.values)
     hi = np.maximum(0.0, p95.values - center.values)
     return lo, hi
@@ -345,25 +330,25 @@ def _err_from_ci_series(center, p5, p95):
 
 def _add_minmax_markers(ax, bars, labels, minmax, x_offset_frac=0.0,
                          legend_labels=None):
-    """Triangle rouge (max) / bleu (min) CENTRÉS sur la barre concernée
-    (x_offset_frac=0 par défaut -- avant décalés sur le côté, ce qui les
-    désalignait visuellement de la barre). Pour éviter tout chevauchement
-    avec le texte d'étiquette (qui reste centré au même endroit), c'est le
-    TEXTE qui est repoussé au-delà du marqueur le plus extrême (voir
-    label_bars : top_extent/bottom_extent incluent désormais le
-    min/max), pas le marqueur qu'on décale.
+    """Red (max) / blue (min) triangles CENTRED on the relevant bar
+    (x_offset_frac=0 by default — previously offset to the side, which
+    visually misaligned them from the bar). To avoid any overlap
+    with the label text (which remains centred in the same place), it is the
+    TEXT that is pushed beyond the outermost marker (see
+    label_bars: top_extent/bottom_extent now include the
+    min/max), not the marker that is offset.
 
-    minmax : {label: (min, max)} -- pour ENSO, combiné dispersion multi-
-    modèles + incertitude bootstrap du modèle ; pour Tendance/Saisonnier,
-    bornes P5/P95 du bootstrap (mêmes valeurs que les barres d'erreur,
-    affichées ici sous forme de triangles pour cohérence visuelle avec
-    ENSO). Retourne {label: (min, max)} pour les labels effectivement
-    marqués, à injecter dans les marges dynamiques d'axe.
+    minmax: {label: (min, max)} — for ENSO, a combination of multi-
+    model dispersion and model bootstrap uncertainty; for Trend/Seasonal,
+    P5/P95 bootstrap limits (same values as the error bars,
+    displayed here as triangles for visual consistency with
+    ENSO). Returns {label: (min, max)} for the labels actually
+    plotted, to be inserted into the dynamic axis margins.
 
-    legend_labels : (label_max, label_min) optionnel -- si fourni, ajoute
-    UNE SEULE entrée de légende pour ce type de marqueur (à ne passer que
-    pour l'un des appels quand la fonction est utilisée plusieurs fois sur
-    le même graphique, pour éviter les entrées dupliquées)."""
+    legend_labels: (label_max, label_min) optional — if provided, adds
+    JUST ONE legend entry for this type of marker (to be passed only
+    in one of the calls when the function is used multiple times on
+    the same plot, to avoid duplicate entries)."""
     marked = {}
     if minmax is None:
         return marked
@@ -386,8 +371,8 @@ def _add_minmax_markers(ax, bars, labels, minmax, x_offset_frac=0.0,
     return marked
 
 
-# Alias rétrocompatible (ancien nom, gardait la signature ENSO-only) --
-# conservé au cas où d'autres scripts du pipeline l'importent directement.
+# Backward-compatible alias (old name, retained the ENSO-only signature) --
+# retained in case other scripts in the pipeline import it directly.
 def _add_enso_minmax_markers(ax, bars, labels, enso_minmax, x_offset_frac=0.0):
     return _add_minmax_markers(
         ax, bars, labels, enso_minmax, x_offset_frac=x_offset_frac,
@@ -397,11 +382,11 @@ def _add_enso_minmax_markers(ax, bars, labels, enso_minmax, x_offset_frac=0.0):
 
 def _draw_header(fig, fig_h, title, subtitle_text, extra_line=None,
                   title_top_in=0.42, gap_in=0.30, wrap_width=125):
-    """Titre + sous-titre (auto-wrappé sur plusieurs lignes si besoin) +
-    ligne optionnelle, ancrés en POUCES depuis le haut de la figure (pas en
-    fraction) -- ne déborde et ne se chevauche jamais, quel que soit le
-    nombre de lignes produit par le wrap ou la hauteur de figure. Retourne
-    la hauteur totale (pouces) occupée par l'en-tête, à passer à
+    """Title + subtitle (auto-wrapped across multiple lines if necessary) +
+    optional line, anchored in INCHES from the top of the figure (not as a
+    fraction) — never overflows or overlaps, regardless of the
+    number of lines produced by the wrap or the height of the figure. Returns
+    the total height (in inches) occupied by the header, to be passed to
     fig.subplots_adjust(top=1 - header_in/fig_h)."""
     wrapped = textwrap.fill(subtitle_text, width=wrap_width)
     n_lines = wrapped.count("\n") + 1
@@ -418,19 +403,20 @@ def _draw_header(fig, fig_h, title, subtitle_text, extra_line=None,
     return header_in
 
 # ----------------------------------------------------------------------
-# 3. GRAPHIQUE BARRES COMPARATIF (moyenne épisode, °C) + IC 90%
+# 3. COMPARATIVE BAR CHART (average per episode, °C) + 90% CI   
 # ----------------------------------------------------------------------
+
 def plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=None, verifs=None, enso_minmax=None,
-                                 filename="gmst_episodes_barres_comparatif.png"):
+                                 filename="gmst_episodes_comparison_bars.png"):
     """
-    enso_minmax : dict optionnel {label: (min_combiné, max_combiné)} -- IC 90%
-        de la MOYENNE de la contribution ENSO sous les scénarios ENSO
-        extrêmes (q0/q100), bootstrap par blocs mobiles inclus (voir
-        build_pipeline()['enso_uncertainty']) -- PAS la dispersion ENSO
-        brute seule, qui sous-estimerait l'incertitude totale. Triangle
-        rouge = max, triangle bleu = min, décalés à côté de la barre ENSO
-        pour ne pas chevaucher son étiquette. Ne s'applique qu'aux labels
-        présents dans le dict (typiquement "2026-2027 (projection)").
+    enso_minmax: optional dictionary {label: (combined_min, combined_max)} -- 90% CI
+        of the AVERAGE ENSO contribution under extreme ENSO
+        scenarios (q0/q100), including moving-block bootstrap (see
+        build_pipeline()[“enso_uncertainty”]) -- NOT the raw ENSO
+        dispersion alone, which would underestimate the total uncertainty. Red
+        triangle = max, blue triangle = min, offset to the side of the ENSO bar
+        so as not to overlap its label. Applies only to labels
+        present in the dict (typically “2026–2027 (projection)”).
     """
     summary = _make_summary(decomps, labels, verifs=verifs)
     has_ext = verifs is not None and summary['ext_var'].notna().any()
@@ -449,16 +435,16 @@ def plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=None, verifs=None
     bars_comp = [(b1, 'trend'), (b2, 'enso'), (b3, 'seasonal')]
     b4 = None
     if has_ext:
-        # NaN (épisode/mois pas encore observés) -> barre à hauteur 0, non
-        # étiquetée normalement (cf. label_bars), pour ne pas fausser l'axe
+        # NaN (episode/month not yet observed) -> bar at height 0, not
+        # labelled as normal (see label_bars), so as not to distort the axis
         ext_plot = summary['ext_var'].fillna(0.0)
         b4 = ax.bar(x + offsets[3] * width, ext_plot, width, color=COLOR_EXT,
                     label="ENSO-external variability (verification minus model)")
         bars_comp.append((b4, 'ext_var'))
 
-    # -- Barres d'erreur IC 90% (si fournies -- uniquement sur trend/enso/
-    #    seasonal : la variabilité externe est un résidu déterministe
-    #    observé-prédit, pas une quantité bootstrappée) --
+    # -- 90% IC error bars (if provided -- only for trend/enso/
+    #    seasonal: external variability is a deterministic
+    #    observed-predicted residual, not a bootstrapped quantity) --
     if ci_by_episode is not None:
         for bars, comp in ((b1, 'trend'), (b2, 'enso'), (b3, 'seasonal')):
             xs, ys, errs_lo, errs_hi = [], [], [], []
@@ -473,15 +459,15 @@ def plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=None, verifs=None
             ax.errorbar(xs, ys, yerr=[errs_lo, errs_hi], fmt='none',
                         ecolor='#1a1a1a', elinewidth=1.3, capsize=4, capthick=1.3, zorder=5)
 
-    # -- Points min/max, CENTRÉS sur chaque barre concernée -- ENSO : incertitude
-    #    COMBINÉE (dispersion multi-modèles + bootstrap du modèle) ; Tendance et
-    #    Saisonnier : bornes P5/P95 du bootstrap (mêmes valeurs que les barres
-    #    d'erreur, affichées en triangles pour la cohérence visuelle) --
-    # -- Triangles min/max restreints aux labels présents dans enso_minmax
-    #    (en pratique, uniquement "2026-2027 (projection)" : seul épisode
-    #    pour lequel une dispersion ENSO multi-modèles existe). Pour les
-    #    épisodes historiques, l'IC 90% bootstrap reste visible via la
-    #    barre d'erreur -- inutile de la dupliquer en triangle. --
+    # -- Min/max points, CENTRED on each relevant bar -- ENSO: uncertainty
+    #    COMBINED (multi-model dispersion + model bootstrap); Trend and
+    #    Seasonal: P5/P95 bounds of the bootstrap (same values as the
+    #    error bars, displayed as triangles for visual consistency) --
+    # -- Min/max triangles restricted to labels present in enso_minmax
+    #    (in practice, only “2026–2027 (projection)”: the only episode
+    #    for which a multi-model ENSO dispersion exists). For
+    #    historical episodes, the 90% bootstrap CI remains visible via the
+    #    error bar — no need to duplicate it as a triangle. —
     minmax_labels = set(enso_minmax.keys()) if enso_minmax else set()
     trend_minmax = ({l: (ci_by_episode[l]['trend'][0], ci_by_episode[l]['trend'][2]) for l in labels if l in minmax_labels}
                      if ci_by_episode is not None else None)
