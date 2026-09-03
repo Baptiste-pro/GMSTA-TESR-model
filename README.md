@@ -66,6 +66,11 @@ If you use this code or data, please cite the accompanying EGU preprint:
 
 > [Full citation to be added]
 
+The archived version of this repository is available at:
+https://doi.org/10.5281/zenodo.22287254
+
 ## License
 
 This project is released under the MIT License. See `LICENSE` for details.
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22287254.svg)](https://doi.org/10.5281/zenodo.22287254)
