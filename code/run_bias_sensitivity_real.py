@@ -138,8 +138,23 @@ def main(path_gmst, path_enso, path_enso_members):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gmst", default="C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/era5_gmst_c3s.csv")
-    parser.add_argument("--enso", default="C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/nino34_real.csv")
-    parser.add_argument("--enso-members", default="C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/enso_members_oni.csv")
+    if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--gmst",
+        default="data/era5_gmst_c3s.csv",
+        help="Path to the GMSTA dataset"
+    )
+    parser.add_argument(
+        "--enso",
+        default="data/nino34_anomaly.csv",
+        help="Path to the Niño 3.4 dataset"
+    )
+    parser.add_argument(
+        "--enso-members",
+        default="data/enso_members_oni.csv",
+        help="Path to the ENSO ensemble-member dataset"
+    )
     args = parser.parse_args()
+  
     main(args.gmst, args.enso, args.enso_members)
