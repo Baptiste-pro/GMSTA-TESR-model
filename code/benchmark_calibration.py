@@ -1,4 +1,6 @@
 """
+Author: Baptiste Boussemart
+
 benchmark_calibration.py
 
 Two pieces of retrospective evaluation requested for peer review, both
@@ -426,8 +428,8 @@ def plot_reliability_diagram(calib_result, threshold=THRESHOLD_DEFAULT, filename
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gmst", default="C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/era5_gmst_c3s.csv")
-    parser.add_argument("--enso", default="C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/nino34_real.csv")
+    parser.add_argument("--gmst", default="C:/your_path/era5_gmst_c3s.csv") #enter path to the file
+    parser.add_argument("--enso", default="C:/your_path/nino34_anomaly.csv") #enter path to the file
     parser.add_argument("--threshold", type=float, default=THRESHOLD_DEFAULT)
     args = parser.parse_args()
 
