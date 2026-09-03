@@ -489,9 +489,9 @@ def plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=None, verifs=None
             lo_err = 0.0
             if ci_by_episode is not None and comp in ci_by_episode.get(labels[i], {}):
                 lo_err, hi_err = _err_from_ci(h, ci_by_episode[labels[i]][comp])
-            # -- le texte est ancré au-delà du point le plus extrême entre la
-            #    barre d'erreur ET le marqueur min/max (s'il existe pour ce
-            #    label), pour ne jamais chevaucher le triangle centré --
+            # -- The text is anchored beyond the most extreme point between the
+            #    error bar AND the min/max marker (if present for this label),
+            #    so that it never overlaps the centered triangle. --
             top_extent = h + hi_err
             bottom_extent = h - lo_err
             if minmax_by_label is not None and labels[i] in minmax_by_label:
@@ -500,7 +500,7 @@ def plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=None, verifs=None
                 bottom_extent = min(bottom_extent, mn)
             va = 'bottom' if h >= 0 else 'top'
             y_anchor = (top_extent + 0.015) if h >= 0 else (bottom_extent - 0.015)
-            txt = "n.d." if is_nan else f"{h:+.2f}°C\n({pct:+.0f}%)"
+            txt = "n.a." if is_nan else f"{h:+.2f}°C\n({pct:+.0f}%)"
             ax.text(bar.get_x() + bar.get_width() / 2, y_anchor, txt, ha='center', va=va,
                     fontsize=8.3, fontweight='bold', color='#1a1a1a')
 
@@ -510,8 +510,8 @@ def plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=None, verifs=None
     if b4 is not None:
         label_bars(b4, 'ext_var_pct', 'ext_var')
 
-    # -- Marges dynamiques : tiennent compte des barres d'erreur, du texte à
-    #    2 lignes ET des marqueurs min/max, pour ne JAMAIS déborder du cadre --
+    # -- Dynamic margins: account for error bars, the 2-line text AND the
+    #    min/max markers, so that the plot NEVER overflows the frame. --
     if ci_by_episode is not None:
         top_candidates = [summary['trend'].iloc[i] + _err_from_ci(summary['trend'].iloc[i], ci_by_episode[l]['trend'])[1]
                            for i, l in enumerate(labels)]
@@ -533,33 +533,43 @@ def plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=None, verifs=None
     y_bottom = min(0.0, min(bottom_candidates)) - 0.18
 
     for i, l in enumerate(labels):
-        ax.text(x[i], y_top * 0.985, f"Total : {summary['total'].iloc[i]:+.2f}°C",
+        ax.text(x[i], y_top * 0.985, f"Total: {summary['total'].iloc[i]:+.2f}°C",
                 ha='center', va='top', fontsize=9.5, style='italic', color='#333333')
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=11)
     ax.axhline(0, color='#333333', lw=0.8)
-    ax.set_ylabel("Mean contribution to the GMSTA anomaly (C, ref. 1850-1900)")
+    ax.set_ylabel("Mean contribution to the GMSTA anomaly (°C, ref. 1850-1900)")
     ax.set_ylim(y_bottom, y_top)
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.13), ncol=2 if has_ext else 3,
               fontsize=10, framealpha=0.9)
     ax.grid(axis='y', alpha=0.3)
 
     fig.subplots_adjust(bottom=0.24 if has_ext else 0.20)
-    sous_titre = ("4 El Nino episodes (July(n) to June(n+1)), episode average - TESR model, "
-                  "exact linear decomposition (ridge); ENSO = Total - Counterfactual (Trend+Seasonal)")
+    subtitle = ("4 El Nino episodes (July(n) to June(n+1)), episode average - TESR model, "
+                "exact linear decomposition (ridge); ENSO = Total - Counterfactual (Trend+Seasonal)")
     if ci_by_episode is not None:
-        sous_titre += " ; barres d'erreur = IC 90% (bootstrap par blocs mobiles, n=300)"
+        subtitle += " ; error bars = 90% CI (moving-block bootstrap, n=300)"
     if has_ext:
-        sous_titre += " ; 4e barre = écart verification-modèle (n.d. = mois pas encore observés)"
+        subtitle += " ; 4th bar = verification-model gap (n.a. = months not yet observed)"
     if enso_minmax_xy or trend_minmax_xy or seasonal_minmax_xy:
-        sous_titre += (" ; triangles = min/max par composante (ENSO : dispersion multi-modèles + bootstrap "
-                        "of the model; Trend/Seasonal: bootstrap P5/P95 bounds)")
-    header_in = _draw_header(fig, fig_h, "Attribution comparative : part anthropique vs part naturelle (ENSO) vs saisonnier",
-                              sous_titre)
+        subtitle += (" ; triangles = min/max by component (ENSO: multi-model spread + bootstrap "
+                     "of the model; Trend/Seasonal: bootstrap P5/P95 bounds)")
+    header_in = _draw_header(
+        fig,
+        fig_h,
+        "Comparative attribution: anthropogenic vs natural (ENSO) vs seasonal contribution",
+        subtitle
+    )
     fig.subplots_adjust(top=1 - header_in / fig_h)
-    fig.text(0.98, 0.01, "Data: ECMWF/Copernicus C3S - ERA5; Nino3.4 ClimateReanalyzer (ref. 1850-1900)",
-              fontsize=7.5, color='#666666', ha='right')
+    fig.text(
+        0.98,
+        0.01,
+        "Data: ECMWF/Copernicus C3S - ERA5; Nino3.4 ClimateReanalyzer (ref. 1850-1900)",
+        fontsize=7.5,
+        color='#666666',
+        ha='right'
+    )
     plt.savefig(filename, dpi=300)
     plt.close()
     plt.rcParams['font.family'] = 'sans-serif'
@@ -567,14 +577,15 @@ def plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=None, verifs=None
 
 
 # ----------------------------------------------------------------------
-# 4. GRAPHIQUE BARRES POURCENTAGE (moyenne épisode, %) + IC 90%
+# 4. PERCENTAGE BAR CHART (episode average, %) + 90% CI
 # ----------------------------------------------------------------------
 def plot_bar_pourcentage(decomps, labels, ci_by_episode=None, verifs=None, enso_minmax_pct=None,
-                          filename="gmst_episodes_barres_pourcentage.png"):
+                          filename="gmst_episodes_percentage_bars.png"):
     """
-    enso_minmax_pct : dict optionnel {label: (min_combiné_%, max_combiné_%)} --
-        même principe que enso_minmax dans plot_bar_comparatif_moyenne, mais
-        en % du total (IC 90% combiné dispersion ENSO + bootstrap du modèle).
+    enso_minmax_pct : optional dict {label: (combined_min_%, combined_max_%)} --
+        same principle as enso_minmax in plot_bar_comparatif_moyenne, but
+        expressed as % of the total (combined 90% CI from ENSO spread
+        + model bootstrap uncertainty).
     """
     summary = _make_summary(decomps, labels, verifs=verifs)
     has_ext = verifs is not None and summary['ext_var'].notna().any()
@@ -587,15 +598,38 @@ def plot_bar_pourcentage(decomps, labels, ci_by_episode=None, verifs=None, enso_
     width = 0.19 if has_ext else 0.26
     offsets = [-1.5, -0.5, 0.5, 1.5] if has_ext else [-1, 0, 1]
 
-    b1 = ax.bar(x + offsets[0] * width, summary['trend_pct'], width, color=COLOR_TREND, label="Tendance (anthropique)")
-    b2 = ax.bar(x + offsets[1] * width, summary['enso_pct'], width, color=COLOR_ENSO, label="ENSO (naturel)")
-    b3 = ax.bar(x + offsets[2] * width, summary['seasonal_pct'], width, color=COLOR_SEAS, label="Residual seasonal")
+    b1 = ax.bar(
+        x + offsets[0] * width,
+        summary['trend_pct'],
+        width,
+        color=COLOR_TREND,
+        label="Trend (anthropogenic)"
+    )
+    b2 = ax.bar(
+        x + offsets[1] * width,
+        summary['enso_pct'],
+        width,
+        color=COLOR_ENSO,
+        label="ENSO (natural)"
+    )
+    b3 = ax.bar(
+        x + offsets[2] * width,
+        summary['seasonal_pct'],
+        width,
+        color=COLOR_SEAS,
+        label="Residual seasonal"
+    )
     bars_comp = [(b1, 'trend_pct'), (b2, 'enso_pct'), (b3, 'seasonal_pct')]
     b4 = None
     if has_ext:
         ext_pct_plot = summary['ext_var_pct'].fillna(0.0)
-        b4 = ax.bar(x + offsets[3] * width, ext_pct_plot, width, color=COLOR_EXT,
-                    label="ENSO-external variability (verification minus model)")
+        b4 = ax.bar(
+            x + offsets[3] * width,
+            ext_pct_plot,
+            width,
+            color=COLOR_EXT,
+            label="ENSO-external variability (verification minus model)"
+        )
         bars_comp.append((b4, 'ext_var_pct'))
 
     if ci_by_episode is not None:
@@ -609,62 +643,151 @@ def plot_bar_pourcentage(decomps, labels, ci_by_episode=None, verifs=None, enso_
                 ys.append(center)
                 errs_lo.append(lo)
                 errs_hi.append(hi)
-            ax.errorbar(xs, ys, yerr=[errs_lo, errs_hi], fmt='none',
-                        ecolor='#1a1a1a', elinewidth=1.3, capsize=4, capthick=1.3, zorder=5)
+            ax.errorbar(
+                xs,
+                ys,
+                yerr=[errs_lo, errs_hi],
+                fmt='none',
+                ecolor='#1a1a1a',
+                elinewidth=1.3,
+                capsize=4,
+                capthick=1.3,
+                zorder=5
+            )
 
-    # -- Points min/max, CENTRÉS sur chaque barre concernée (calculés avant
-    #    les étiquettes pour que le texte puisse être repoussé au-delà du
-    #    triangle le plus extrême) -- ENSO : incertitude combinée dispersion
-    #    multi-modèles + bootstrap ; Tendance/Saisonnier : bornes P5/P95 du
-    #    bootstrap, en % --
-    # -- Triangles min/max restreints aux labels présents dans enso_minmax_pct
-    #    (en pratique, uniquement "2026-2027 (projection)") -- cf. même
-    #    remarque que dans plot_bar_comparatif_moyenne. --
+    # -- Min/max points, CENTERED on each relevant bar (calculated before
+    #    the labels so that the text can be pushed beyond the most extreme
+    #    triangle) -- ENSO: combined uncertainty from multi-model spread
+    #    + bootstrap; Trend/Seasonal: bootstrap P5/P95 bounds, in %. --
+    # -- Min/max triangles restricted to labels present in enso_minmax_pct
+    #    (in practice, only "2026-2027 (projection)") -- see the same
+    #    note as in plot_bar_comparatif_moyenne. --
     minmax_labels = set(enso_minmax_pct.keys()) if enso_minmax_pct else set()
-    trend_minmax_pct = ({l: (ci_by_episode[l]['trend_pct'][0], ci_by_episode[l]['trend_pct'][2]) for l in labels if l in minmax_labels}
-                         if ci_by_episode is not None else None)
-    seasonal_minmax_pct = ({l: (ci_by_episode[l]['seasonal_pct'][0], ci_by_episode[l]['seasonal_pct'][2]) for l in labels if l in minmax_labels}
-                            if ci_by_episode is not None else None)
-    trend_minmax_xy = _add_minmax_markers(ax, b1, labels, trend_minmax_pct)
+    trend_minmax_pct = (
+        {
+            l: (
+                ci_by_episode[l]['trend_pct'][0],
+                ci_by_episode[l]['trend_pct'][2]
+            )
+            for l in labels
+            if l in minmax_labels
+        }
+        if ci_by_episode is not None else None
+    )
+    seasonal_minmax_pct = (
+        {
+            l: (
+                ci_by_episode[l]['seasonal_pct'][0],
+                ci_by_episode[l]['seasonal_pct'][2]
+            )
+            for l in labels
+            if l in minmax_labels
+        }
+        if ci_by_episode is not None else None
+    )
+
+    trend_minmax_xy = _add_minmax_markers(
+        ax,
+        b1,
+        labels,
+        trend_minmax_pct
+    )
+
     enso_minmax_xy = _add_minmax_markers(
-        ax, b2, labels, enso_minmax_pct,
-        legend_labels=('Max (ENSO spread + model uncertainty)',
-                        'Min (ENSO spread + model uncertainty)'))
-    seasonal_minmax_xy = _add_minmax_markers(ax, b3, labels, seasonal_minmax_pct)
-    minmax_by_comp = {'trend_pct': trend_minmax_xy, 'enso_pct': enso_minmax_xy, 'seasonal_pct': seasonal_minmax_xy}
+        ax,
+        b2,
+        labels,
+        enso_minmax_pct,
+        legend_labels=(
+            'Max (ENSO spread + model uncertainty)',
+            'Min (ENSO spread + model uncertainty)'
+        )
+    )
+
+    seasonal_minmax_xy = _add_minmax_markers(
+        ax,
+        b3,
+        labels,
+        seasonal_minmax_pct
+    )
+
+    minmax_by_comp = {
+        'trend_pct': trend_minmax_xy,
+        'enso_pct': enso_minmax_xy,
+        'seasonal_pct': seasonal_minmax_xy
+    }
 
     for bars, comp in bars_comp:
         for i, bar in enumerate(bars):
             h = bar.get_height()
             is_nan = comp == 'ext_var_pct' and pd.isna(summary['ext_var_pct'].iloc[i])
             lo_err = hi_err = 0.0
+
             if ci_by_episode is not None and comp in ci_by_episode.get(labels[i], {}):
-                lo_err, hi_err = _err_from_ci(h, ci_by_episode[labels[i]][comp])
+                lo_err, hi_err = _err_from_ci(
+                    h,
+                    ci_by_episode[labels[i]][comp]
+                )
+
             top_extent = h + hi_err
             bottom_extent = h - lo_err
+
             mm = minmax_by_comp.get(comp)
             if mm is not None and labels[i] in mm:
                 mn, mx = mm[labels[i]]
                 top_extent = max(top_extent, mx)
                 bottom_extent = min(bottom_extent, mn)
+
             va = 'bottom' if h >= 0 else 'top'
-            y_anchor = (top_extent + 1.5) if h >= 0 else (bottom_extent - 1.5)
-            txt = "n.d." if is_nan else f"{h:+.0f}%"
-            ax.text(bar.get_x() + bar.get_width() / 2, y_anchor, txt,
-                    ha='center', va=va, fontsize=9, fontweight='bold', color='#1a1a1a')
+            y_anchor = (
+                (top_extent + 1.5)
+                if h >= 0
+                else (bottom_extent - 1.5)
+            )
+
+            txt = "n.a." if is_nan else f"{h:+.0f}%"
+
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                y_anchor,
+                txt,
+                ha='center',
+                va=va,
+                fontsize=9,
+                fontweight='bold',
+                color='#1a1a1a'
+            )
 
     if ci_by_episode is not None:
-        top_c = [max(summary['trend_pct'].iloc[i] + _err_from_ci(summary['trend_pct'].iloc[i], ci_by_episode[l]['trend_pct'])[1], 100)
-                 for i, l in enumerate(labels)]
-        bot_c = [summary['seasonal_pct'].iloc[i] - _err_from_ci(summary['seasonal_pct'].iloc[i], ci_by_episode[l]['seasonal_pct'])[0]
-                 for i, l in enumerate(labels)]
+        top_c = [
+            max(
+                summary['trend_pct'].iloc[i]
+                + _err_from_ci(
+                    summary['trend_pct'].iloc[i],
+                    ci_by_episode[l]['trend_pct']
+                )[1],
+                100
+            )
+            for i, l in enumerate(labels)
+        ]
+
+        bot_c = [
+            summary['seasonal_pct'].iloc[i]
+            - _err_from_ci(
+                summary['seasonal_pct'].iloc[i],
+                ci_by_episode[l]['seasonal_pct']
+            )[0]
+            for i, l in enumerate(labels)
+        ]
     else:
         top_c = [100]
         bot_c = list(summary['seasonal_pct'])
+
     if has_ext:
         ext_pct_vals = summary['ext_var_pct'].fillna(0.0)
         top_c = top_c + list(ext_pct_vals)
         bot_c = bot_c + list(ext_pct_vals)
+
     for xy in (trend_minmax_xy, enso_minmax_xy, seasonal_minmax_xy):
         if xy:
             top_c.append(max(mx for _, mx in xy.values()))
@@ -679,308 +802,683 @@ def plot_bar_pourcentage(decomps, labels, ci_by_episode=None, verifs=None, enso_
     ax.axhline(100, color='#999999', lw=0.6, ls=':')
     ax.set_ylabel("Share of total GMSTA anomaly (%)")
     ax.set_ylim(y_bottom, y_top)
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.13), ncol=2 if has_ext else 3,
-              fontsize=10, framealpha=0.9)
+
+    ax.legend(
+        loc='upper center',
+        bbox_to_anchor=(0.5, -0.13),
+        ncol=2 if has_ext else 3,
+        fontsize=10,
+        framealpha=0.9
+    )
+
     ax.grid(axis='y', alpha=0.3)
 
     fig.subplots_adjust(bottom=0.24 if has_ext else 0.20)
-    sous_titre = ("4 El Nino episodes (July(n) to June(n+1)) - the 3 signed shares sum to 100% by construction "
-                  "; ENSO = Total - Contrefactuel (Tendance+Saisonnier)")
+
+    subtitle = (
+        "4 El Nino episodes (July(n) to June(n+1)) - the 3 signed shares "
+        "sum to 100% by construction; ENSO = Total - Counterfactual "
+        "(Trend+Seasonal)"
+    )
+
     if ci_by_episode is not None:
-        sous_titre += " ; IC 90% (bootstrap par blocs mobiles, n=300)"
+        subtitle += " ; 90% CI (moving-block bootstrap, n=300)"
+
     if has_ext:
-        sous_titre += " ; 4e barre = écart verification-modèle en % du total (n.d. = mois pas encore observés)"
+        subtitle += (
+            " ; 4th bar = verification-model gap as % of total "
+            "(n.a. = months not yet observed)"
+        )
+
     if enso_minmax_xy or trend_minmax_xy or seasonal_minmax_xy:
-        sous_titre += (" ; triangles = min/max par composante (ENSO : dispersion multi-modèles + bootstrap "
-                        "of the model; Trend/Seasonal: bootstrap P5/P95 bounds)")
-    header_in = _draw_header(fig, fig_h, "Percentage breakdown of the total anomaly: anthropogenic vs natural vs seasonal",
-                              sous_titre)
+        subtitle += (
+            " ; triangles = min/max by component "
+            "(ENSO: multi-model spread + model bootstrap; "
+            "Trend/Seasonal: bootstrap P5/P95 bounds)"
+        )
+
+    header_in = _draw_header(
+        fig,
+        fig_h,
+        "Percentage breakdown of the total anomaly: "
+        "anthropogenic vs natural vs seasonal",
+        subtitle
+    )
+
     fig.subplots_adjust(top=1 - header_in / fig_h)
-    fig.text(0.98, 0.01, "Data: ECMWF/Copernicus C3S - ERA5; Nino3.4 ClimateReanalyzer (ref. 1850-1900)",
-              fontsize=7.5, color='#666666', ha='right')
+
+    fig.text(
+        0.98,
+        0.01,
+        "Data: ECMWF/Copernicus C3S - ERA5; "
+        "Nino3.4 ClimateReanalyzer (ref. 1850-1900)",
+        fontsize=7.5,
+        color='#666666',
+        ha='right'
+    )
+
     plt.savefig(filename, dpi=300)
     plt.close()
     plt.rcParams['font.family'] = 'sans-serif'
+
     return summary
 
 
 # ----------------------------------------------------------------------
-# 5. FONCTION DISTINCTE : scénario réel vs contrefactuel, 1 fichier / épisode
-#    (inchangé, pas concerné par la demande d'IC sur les barres)
+# 5. DISTINCT FUNCTION: real scenario vs counterfactual, 1 file / episode
+#    (unchanged, not affected by the CI request for the bars)
 # ----------------------------------------------------------------------
-def plot_scenario_vs_contrefactuel_single(label, decomp, lag, verif=None, ci_monthly=None,
-                                            envelope=None, filename=None):
+def plot_scenario_vs_contrefactuel_single(
+    label,
+    decomp,
+    lag,
+    verif=None,
+    ci_monthly=None,
+    envelope=None,
+    filename=None
+):
     """
-    envelope : dict optionnel {'p25','p75','p05','p95','q0','q100'} -> {'ci_monthly':
-        DataFrame, 'ci_mean': dict, 'decomp_central': DataFrame}, tel que produit
-        par build_pipeline()['enso_uncertainty'][label].
+    envelope : optional dict {'p25','p75','p05','p95','q0','q100'} ->
+        {'ci_monthly': DataFrame, 'ci_mean': dict, 'decomp_central': DataFrame},
+        as produced by build_pipeline()['enso_uncertainty'][label].
 
-        IMPORTANT -- deux sources d'incertitude bien DISTINCTES, affichées
-        séparément (elles étaient empilées dans une même bande dans une version
-        précédente, ce qui les confondait visuellement) :
+        IMPORTANT -- two clearly DISTINCT sources of uncertainty are displayed
+        separately (they were previously stacked into the same band, which
+        visually mixed them together):
 
-          1. DISPERSION MULTI-MODÈLES ENSO (bandes bleues pleines + lignes
-             pointillées) : la décomposition CENTRALE du modèle (sans
-             bootstrap, 'decomp_central') appliquée à chaque scénario ENSO
-             (q0/p05/p25/p75/p95/q100). C'est une quantité DÉTERMINISTE --
-             "si tel scénario ENSO se réalise, voici ce que prédit le modèle
-             central" -- PAS une incertitude statistique. Trois paliers
-             emboîtés : Q0-Q100 (dispersion totale), Q5-Q95, Q25-Q75 (cœur de
-             la distribution) ; les bornes Q0/Q100 sont en plus tracées en
-             pointillés pour repérer l'enveloppe extrême exacte.
-          2. INCERTITUDE PROPRE DU MODÈLE TESR : bootstrap par blocs mobiles
-             (Künsch 1989), affichée à DEUX endroits complémentaires --
-             (a) en barres d'erreur sur la courbe centrale rouge/grise
-                 (scénario ENSO median) ;
-             (b) en frange POINTILLÉE ("grid of points", hatch, pas
-                 d'aplat) qui prolonge CHAQUE bord des 3 paliers ci-dessus
-                 jusqu'à la queue P5/P95 du bootstrap propre à ce scénario --
-                 sans elle, l'incertitude réelle à chaque quantile serait
-                 sous-estimée (biais optimiste des probabilités affichées) ;
-                 en aplat plein elle se remélangerait avec la dispersion ENSO
-                 (défaut d'une version précédente). La frange est donc
-                 visible et mesurable, mais visuellement secondaire par
-                 rapport aux bandes pleines.
+          1. MULTI-MODEL ENSO SPREAD (solid blue bands + dotted lines):
+             the CENTRAL model decomposition (without bootstrap,
+             'decomp_central') applied to each ENSO scenario
+             (q0/p05/p25/p75/p95/q100). This is a DETERMINISTIC quantity --
+             "if this ENSO scenario occurs, this is what the central model
+             predicts" -- NOT a statistical uncertainty. Three nested tiers:
+             Q0-Q100 (total spread), Q5-Q95, Q25-Q75 (core of the
+             distribution); the Q0/Q100 bounds are additionally plotted as
+             dotted lines to identify the exact extreme envelope.
 
-        N'a de sens que pour un scénario projeté (ENSO multi-modèles) ; les
-        épisodes historiques (ENSO observé) n'en fournissent pas.
+          2. TESR MODEL'S OWN UNCERTAINTY: moving-block bootstrap
+             (Künsch 1989), displayed in TWO complementary ways --
+             (a) as error bars on the central red/grey curve
+                 (median ENSO scenario);
+             (b) as a DOTTED FRINGE ("grid of dots", hatch, no solid fill)
+                 extending EACH edge of the 3 tiers above to the P5/P95 tail
+                 of the bootstrap specific to that scenario --
+                 without it, the true uncertainty at each quantile would be
+                 underestimated (optimistic bias in the displayed
+                 probabilities); with solid fill, it would be mixed back
+                 together with the ENSO spread (the flaw of a previous
+                 version). The fringe is therefore visible and measurable,
+                 but visually secondary relative to the solid bands.
+
+        This is meaningful only for a projected scenario (multi-model ENSO);
+        historical episodes (observed ENSO) do not provide this information.
     """
     if filename is None:
         safe = label.replace(" ", "_").replace("(", "").replace(")", "")
-        filename = f"gmst_scenario_vs_contrefactuel_{safe}.png"
+        filename = f"gmst_scenario_vs_counterfactual_{safe}.png"
 
-    contrefactuel = decomp['trend'] + decomp['seasonal']
+    counterfactual = decomp['trend'] + decomp['seasonal']
     idx = decomp.index
 
     plt.rcParams['font.family'] = 'serif'
     fig_w, fig_h = 14.5, 8.6
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    # -- 1) DISPERSION MULTI-MODÈLES ENSO SEULE (déterministe, decomp_central
-    #    sans bootstrap) -- 3 paliers emboîtés du plus large (Q0-Q100) au
-    #    plus resserré (Q25-Q75), bleu de plus en plus saturé vers le centre --
+    # -- 1) MULTI-MODEL ENSO SPREAD ONLY (deterministic, decomp_central
+    #    without bootstrap) -- 3 nested tiers from the widest (Q0-Q100)
+    #    to the narrowest (Q25-Q75), with increasingly saturated blue
+    #    tones toward the center. --
     env_bounds = None
+
     if envelope is not None:
+
         def _central(col):
             return envelope[col]['decomp_central']['total'].reindex(idx)
+
         def _tail(col, which):
             return envelope[col]['ci_monthly'][which].reindex(idx)
 
-        # -- Couleurs : QUANTILE_BANDS (palette.py) -- 3 teintes bleues
-        #    réellement distinctes en teinte+luminosité (pas un simple
-        #    empilement d'alpha sur une même couleur, qui washait tout en un
-        #    bleu-marine quasi uniforme -- cf. gotcha documentée dans
-        #    palette.py/light_tint : un alpha Patch-level passé EN PLUS d'une
-        #    couleur RGBA écrase l'alpha embarqué dans cette RGBA, donc les 3
-        #    paliers rendaient tous à alpha~0.9 avec la teinte COMPLÈTE de
-        #    COUNTERFACT -- d'où les "nuances de bleu foncé" peu lisibles). --
+        # -- Colors: QUANTILE_BANDS (palette.py) -- 3 blue shades
+        #    genuinely distinct in hue + brightness (not simply stacking
+        #    alpha on the same color, which washed everything into an almost
+        #    uniform navy blue -- see the documented gotcha in
+        #    palette.py/light_tint: a Patch-level alpha applied IN ADDITION
+        #    to an RGBA color overrides the alpha embedded in that RGBA,
+        #    causing all 3 tiers to render at alpha~0.9 with the FULL hue
+        #    of COUNTERFACT -- hence the poorly readable "dark blue shades"). --
         tiers = [
-            ('q0',  'q100', QUANTILE_BANDS[0], 1.0, 1, 'Multi-model ENSO spread (Q0-Q100)'),
-            ('p05', 'p95',  QUANTILE_BANDS[1], 1.0, 2, 'Multi-model ENSO spread (Q5-Q95)'),
-            ('p25', 'p75',  QUANTILE_BANDS[2], 1.0, 3, 'Multi-model ENSO spread (Q25-Q75)'),
+            (
+                'q0',
+                'q100',
+                QUANTILE_BANDS[0],
+                1.0,
+                1,
+                'Multi-model ENSO spread (Q0-Q100)'
+            ),
+            (
+                'p05',
+                'p95',
+                QUANTILE_BANDS[1],
+                1.0,
+                2,
+                'Multi-model ENSO spread (Q5-Q95)'
+            ),
+            (
+                'p25',
+                'p75',
+                QUANTILE_BANDS[2],
+                1.0,
+                3,
+                'Multi-model ENSO spread (Q25-Q75)'
+            ),
         ]
+
         for lo_col, hi_col, color, alpha, z, lbl in tiers:
-            ax.fill_between(idx, _central(lo_col), _central(hi_col), color=color,
-                             alpha=alpha, lw=0, zorder=z, label=lbl)
+            ax.fill_between(
+                idx,
+                _central(lo_col),
+                _central(hi_col),
+                color=color,
+                alpha=alpha,
+                lw=0,
+                zorder=z,
+                label=lbl
+            )
 
-        ax.plot(idx, _central('q0'), color=COUNTERFACT, lw=1.1, ls=':', zorder=4)
-        ax.plot(idx, _central('q100'), color=COUNTERFACT, lw=1.1, ls=':', zorder=4,
-                label='Lowest / highest projection (Q0/Q100)')
+        ax.plot(
+            idx,
+            _central('q0'),
+            color=COUNTERFACT,
+            lw=1.1,
+            ls=':',
+            zorder=4
+        )
 
-        # -- 1bis) INCERTITUDE PROPRE DU MODÈLE, PROPAGÉE À CHAQUE QUANTILE
-        #    (pas seulement au scénario median) : l'omettre biaiserait les
-        #    probabilités affichées (les bandes ENSO seules sous-estiment le
-        #    flou réel à chaque borne) ; mais l'empiler en aplat plein comme
-        #    dans une version précédente la refond avec la dispersion ENSO et
-        #    rend le graphique illisible. Compromis : une FRANGE POINTILLÉE
-        #    ("grid of points", hatch='....', pas de remplissage plein) qui
-        #    prolonge chaque bord de palier jusqu'à la queue P5/P95 du
-        #    bootstrap DE CE SCÉNARIO -- visible, mesurable au besoin, mais
-        #    visuellement subordonnée aux bandes pleines (dispersion ENSO =
-        #    lecture principale ; frange pointillée = supplément d'incertitude
-        #    statistique, secondaire). Un seul palier -- Q25-Q75, le plus
-        #    interne -- porte l'étiquette de légende (les 3 paliers partagent
-        #    le même style, une légende par palier serait redondante). --
-        fringe_kw = dict(facecolor='none', hatch='.', linewidth=0.0, alpha=0.38, zorder=3.6)
+        ax.plot(
+            idx,
+            _central('q100'),
+            color=COUNTERFACT,
+            lw=1.1,
+            ls=':',
+            zorder=4,
+            label='Lowest / highest projection (Q0/Q100)'
+        )
+
+        # -- 1bis) MODEL'S OWN UNCERTAINTY, PROPAGATED TO EACH QUANTILE
+        #    (not only to the median scenario): omitting it would bias the
+        #    displayed probabilities (ENSO-only bands underestimate the
+        #    true uncertainty at each bound); however, stacking it as a
+        #    solid fill, as in a previous version, mixes it with the ENSO
+        #    spread and makes the graph unreadable. Compromise: a DOTTED
+        #    FRINGE ("grid of dots", hatch='....', no solid fill) extending
+        #    each tier edge to the P5/P95 tail of the bootstrap FOR THIS
+        #    SCENARIO -- visible and measurable if needed, but visually
+        #    subordinate to the solid bands (ENSO spread = primary reading;
+        #    dotted fringe = secondary statistical uncertainty). Only one
+        #    tier -- Q25-Q75, the innermost one -- carries the legend label
+        #    (all 3 tiers share the same style, so one legend entry per tier
+        #    would be redundant). --
+        fringe_kw = dict(
+            facecolor='none',
+            hatch='.',
+            linewidth=0.0,
+            alpha=0.38,
+            zorder=3.6
+        )
+
         _hatch_lw_saved = plt.rcParams['hatch.linewidth']
-        plt.rcParams['hatch.linewidth'] = 0.5  # traits de hachure fins -> lecture "frange", pas "texture"
-        outer_lo, outer_hi = _tail('q0', 'total_p5'), _tail('q100', 'total_p95')
-        ax.fill_between(idx, outer_lo, _central('q0'), edgecolor=COUNTERFACT, **fringe_kw)
-        ax.fill_between(idx, _central('q100'), outer_hi, edgecolor=COUNTERFACT, **fringe_kw)
-        mid_lo, mid_hi = _tail('p05', 'total_p5'), _tail('p95', 'total_p95')
-        ax.fill_between(idx, mid_lo, _central('p05'), edgecolor=COUNTERFACT, **fringe_kw)
-        ax.fill_between(idx, _central('p95'), mid_hi, edgecolor=COUNTERFACT, **fringe_kw)
-        in_lo, in_hi = _tail('p25', 'total_p5'), _tail('p75', 'total_p95')
-        ax.fill_between(idx, in_lo, _central('p25'), edgecolor=COUNTERFACT_DARK, **fringe_kw)
-        ax.fill_between(idx, _central('p75'), in_hi, edgecolor=COUNTERFACT_DARK, **fringe_kw,
-                         label="Model's own uncertainty at each quantile\n(bootstrap, dotted band)")
+        plt.rcParams['hatch.linewidth'] = 0.5  # fine hatch lines -> "fringe" reading, not "texture"
+
+        outer_lo, outer_hi = (
+            _tail('q0', 'total_p5'),
+            _tail('q100', 'total_p95')
+        )
+
+        ax.fill_between(
+            idx,
+            outer_lo,
+            _central('q0'),
+            edgecolor=COUNTERFACT,
+            **fringe_kw
+        )
+
+        ax.fill_between(
+            idx,
+            _central('q100'),
+            outer_hi,
+            edgecolor=COUNTERFACT,
+            **fringe_kw
+        )
+
+        mid_lo, mid_hi = (
+            _tail('p05', 'total_p5'),
+            _tail('p95', 'total_p95')
+        )
+
+        ax.fill_between(
+            idx,
+            mid_lo,
+            _central('p05'),
+            edgecolor=COUNTERFACT,
+            **fringe_kw
+        )
+
+        ax.fill_between(
+            idx,
+            _central('p95'),
+            mid_hi,
+            edgecolor=COUNTERFACT,
+            **fringe_kw
+        )
+
+        in_lo, in_hi = (
+            _tail('p25', 'total_p5'),
+            _tail('p75', 'total_p95')
+        )
+
+        ax.fill_between(
+            idx,
+            in_lo,
+            _central('p25'),
+            edgecolor=COUNTERFACT_DARK,
+            **fringe_kw
+        )
+
+        ax.fill_between(
+            idx,
+            _central('p75'),
+            in_hi,
+            edgecolor=COUNTERFACT_DARK,
+            **fringe_kw,
+            label="Model's own uncertainty at each quantile\n"
+                  "(bootstrap, dotted band)"
+        )
+
         plt.rcParams['hatch.linewidth'] = _hatch_lw_saved
 
-        env_bounds = (outer_lo, outer_hi)  # étendue verticale réelle = dispersion ENSO + incertitude modèle
+        env_bounds = (
+            outer_lo,
+            outer_hi
+        )  # actual vertical extent = ENSO spread + model uncertainty
 
-    # -- 2) INCERTITUDE PROPRE DU MODÈLE (bootstrap par blocs mobiles), À
-    #    SCÉNARIO ENSO MÉDIAN FIXÉ -- barres d'erreur SEULEMENT, jamais
-    #    remélangée dans une bande de dispersion ENSO --
+    # -- 2) MODEL'S OWN UNCERTAINTY (moving-block bootstrap), WITH THE
+    #    MEDIAN ENSO SCENARIO FIXED -- error bars ONLY, never mixed back
+    #    into an ENSO spread band. --
     has_ci = ci_monthly is not None
+
     if has_ci:
-        ci_al = ci_monthly.reindex(idx)  # aligne au cas où l'index diffère
-        lo_tot, hi_tot = _err_from_ci_series(decomp['total'], ci_al['total_p5'], ci_al['total_p95'])
-        lo_cf, hi_cf = _err_from_ci_series(contrefactuel, ci_al['contrefactuel_p5'], ci_al['contrefactuel_p95'])
+        ci_al = ci_monthly.reindex(idx)  # align in case the index differs
 
-        ax.errorbar(idx, decomp['total'], yerr=[lo_tot, hi_tot],
-                    color=COLOR_TREND, lw=2.2, marker='o', ms=5, capsize=3, elinewidth=1.1,
-                    ecolor=COLOR_TREND, alpha=0.95, zorder=6, label='Model prediction (with El Nino)')
-        ax.errorbar(idx, contrefactuel, yerr=[lo_cf, hi_cf],
-                    color='#555555', lw=2.0, ls='--', marker='o', ms=5, capsize=3, elinewidth=1.1,
-                    ecolor='#555555', alpha=0.85, zorder=6, label='Counterfactual (ENSO-neutral)')
+        lo_tot, hi_tot = _err_from_ci_series(
+            decomp['total'],
+            ci_al['total_p5'],
+            ci_al['total_p95']
+        )
+
+        lo_cf, hi_cf = _err_from_ci_series(
+            counterfactual,
+            ci_al['counterfactual_p5'],
+            ci_al['counterfactual_p95']
+        )
+
+        ax.errorbar(
+            idx,
+            decomp['total'],
+            yerr=[lo_tot, hi_tot],
+            color=COLOR_TREND,
+            lw=2.2,
+            marker='o',
+            ms=5,
+            capsize=3,
+            elinewidth=1.1,
+            ecolor=COLOR_TREND,
+            alpha=0.95,
+            zorder=6,
+            label='Model prediction (with El Nino)'
+        )
+
+        ax.errorbar(
+            idx,
+            counterfactual,
+            yerr=[lo_cf, hi_cf],
+            color='#555555',
+            lw=2.0,
+            ls='--',
+            marker='o',
+            ms=5,
+            capsize=3,
+            elinewidth=1.1,
+            ecolor='#555555',
+            alpha=0.85,
+            zorder=6,
+            label='Counterfactual (ENSO-neutral)'
+        )
+
     else:
-        ax.plot(idx, decomp['total'], color=COLOR_TREND, lw=2.2, marker='o', ms=5,
-                zorder=6, label='Central model prediction (with El Nino)')
-        ax.plot(idx, contrefactuel, color='#555555', lw=2.0, ls='--', marker='o', ms=5,
-                zorder=6, label='Counterfactual (ENSO-neutral)')
+        ax.plot(
+            idx,
+            decomp['total'],
+            color=COLOR_TREND,
+            lw=2.2,
+            marker='o',
+            ms=5,
+            zorder=6,
+            label='Central model prediction (with El Nino)'
+        )
 
-    # -- 3) CONTRIBUTION EL NIÑO (scénario median) -- zone HACHURÉE rouge,
-    #    pour ne jamais se confondre visuellement avec les bandes bleues de
-    #    dispersion ENSO ci-dessus (remplissage quasi transparent + hachures
-    #    obliques rouges, comme les diagrammes d'attribution IPCC) --
-    ax.fill_between(idx, contrefactuel, decomp['total'], facecolor=COLOR_ENSO, alpha=0.12,
-                     zorder=4, lw=0)
-    ax.fill_between(idx, contrefactuel, decomp['total'], facecolor='none', edgecolor=COLOR_ENSO,
-                     hatch='///', linewidth=0.0, zorder=4.5, label='El Nino contribution (hatched area)')
+        ax.plot(
+            idx,
+            counterfactual,
+            color='#555555',
+            lw=2.0,
+            ls='--',
+            marker='o',
+            ms=5,
+            zorder=6,
+            label='Counterfactual (ENSO-neutral)'
+        )
 
-    # -- Ligne de verification (observation ERA5/C3S réellement mesurée),
-    #    en noir, uniquement pour les mois déjà observés (NaN sinon --
-    #    matplotlib saute alors ces points, la ligne "stops" simplement) --
+    # -- 3) EL NINO CONTRIBUTION (median scenario) -- RED HATCHED AREA,
+    #    so that it never becomes visually confused with the blue ENSO-spread
+    #    bands above (nearly transparent fill + diagonal red hatching,
+    #    as in IPCC attribution diagrams). --
+    ax.fill_between(
+        idx,
+        counterfactual,
+        decomp['total'],
+        facecolor=COLOR_ENSO,
+        alpha=0.12,
+        zorder=4,
+        lw=0
+    )
+
+    ax.fill_between(
+        idx,
+        counterfactual,
+        decomp['total'],
+        facecolor='none',
+        edgecolor=COLOR_ENSO,
+        hatch='///',
+        linewidth=0.0,
+        zorder=4.5,
+        label='El Nino contribution (hatched area)'
+    )
+
+    # -- Verification line (actual measured ERA5/C3S observation),
+    #    in black, only for months already observed (NaN otherwise --
+    #    matplotlib skips these points, so the line simply stops). --
     ext_var_mean = None
     n_obs = 0
     verif_aligned = None
+
     if verif is not None:
         verif_aligned = verif.reindex(idx)
         n_obs = int(verif_aligned.notna().sum())
+
         if n_obs > 0:
-            ax.plot(idx, verif_aligned, color=COLOR_VERIF, lw=2.0, ls='-', marker='s', ms=5,
-                    zorder=7, label='Verification (observed ERA5/C3S)')
-            ext_var = compute_external_variability(decomp, verif_aligned)
+            ax.plot(
+                idx,
+                verif_aligned,
+                color=COLOR_VERIF,
+                lw=2.0,
+                ls='-',
+                marker='s',
+                ms=5,
+                zorder=7,
+                label='Verification (observed ERA5/C3S)'
+            )
+
+            ext_var = compute_external_variability(
+                decomp,
+                verif_aligned
+            )
+
             ext_var_mean = ext_var.mean(skipna=True)
 
-    # -- Seuils de référence (mêmes styles que model.py) : toujours tracés,
-    #    visibles seulement si l'épisode s'en approche --
-    threshold_styles = {1.5: (':', '#888888', '+1.5 \u00b0C threshold (Paris Agreement)'),
-                         2.0: ('--', '#555555', '+2 \u00b0C threshold')}
-    y_data_max = max(decomp['total'].max(), contrefactuel.max())
+    # -- Reference thresholds (same styles as model.py): always plotted,
+    #    but visible only if the episode approaches them. --
+    threshold_styles = {
+        1.5: (
+            ':',
+            '#888888',
+            '+1.5 \u00b0C threshold (Paris Agreement)'
+        ),
+        2.0: (
+            '--',
+            '#555555',
+            '+2 \u00b0C threshold'
+        )
+    }
+
+    y_data_max = max(
+        decomp['total'].max(),
+        counterfactual.max()
+    )
+
     shown_thresholds = []
+
     for th, (ls, col, lab) in threshold_styles.items():
         if th <= y_data_max * 1.25:
-            ax.axhline(th, color=col, linestyle=ls, lw=1.1, label=lab)
+            ax.axhline(
+                th,
+                color=col,
+                linestyle=ls,
+                lw=1.1,
+                label=lab
+            )
             shown_thresholds.append(th)
 
-    # -- Étendue verticale EXPLICITE : inclut la courbe, l'IC du modèle, les
-    #    3 bandes d'enveloppe combinées et la verification -- avec marge
-    #    généreuse, pour ne plus jamais rogner les extrêmes affichés --
-    y_series = [decomp['total'], contrefactuel]
+    # -- EXPLICIT vertical extent: includes the curve, model CI,
+    #    the 3 combined envelope bands and the verification -- with
+    #    generous margins, so that the displayed extremes are never
+    #    cropped. --
+    y_series = [
+        decomp['total'],
+        counterfactual
+    ]
+
     if has_ci:
-        y_series += [ci_al['total_p5'], ci_al['total_p95'], ci_al['contrefactuel_p5'], ci_al['contrefactuel_p95']]
+        y_series += [
+            ci_al['total_p5'],
+            ci_al['total_p95'],
+            ci_al['counterfactual_p5'],
+            ci_al['counterfactual_p95']
+        ]
+
     if env_bounds is not None:
-        y_series += [env_bounds[0], env_bounds[1]]
+        y_series += [
+            env_bounds[0],
+            env_bounds[1]
+        ]
+
     if n_obs > 0:
         y_series.append(verif_aligned)
-    all_y = np.concatenate([s.to_numpy(dtype=float) for s in y_series])
-    all_y = all_y[~np.isnan(all_y)]
-    y_min, y_max = all_y.min(), all_y.max()
-    if shown_thresholds:
-        y_max = max(y_max, max(shown_thresholds))
-    y_span = max(y_max - y_min, 0.2)
-    ax.set_ylim(y_min - 0.15 * y_span, y_max + 0.15 * y_span)
 
-    ax.set_ylabel("Global mean surface temperature anomaly (\u00b0C) [1850-1900 baseline]")
+    all_y = np.concatenate([
+        s.to_numpy(dtype=float)
+        for s in y_series
+    ])
+
+    all_y = all_y[~np.isnan(all_y)]
+
+    y_min, y_max = all_y.min(), all_y.max()
+
+    if shown_thresholds:
+        y_max = max(
+            y_max,
+            max(shown_thresholds)
+        )
+
+    y_span = max(
+        y_max - y_min,
+        0.2
+    )
+
+    ax.set_ylim(
+        y_min - 0.15 * y_span,
+        y_max + 0.15 * y_span
+    )
+
+    ax.set_ylabel(
+        "Global mean surface temperature anomaly "
+        "(\u00b0C) [1850-1900 baseline]"
+    )
+
     ax.grid(alpha=0.3)
-    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+
+    ax.xaxis.set_major_locator(
+        mdates.MonthLocator(interval=1)
+    )
+
+    ax.xaxis.set_major_formatter(
+        mdates.DateFormatter('%b %Y')
+    )
+
     fig.autofmt_xdate(rotation=45)
 
-    # -- En-tête (titre + sous-titre) ancré en POUCES depuis le haut, pas en
-    #    fraction de figure -- indépendant du nombre de lignes du sous-titre
-    #    (auto-retour à la ligne) et de la taille de figure, donc ne déborde
-    #    jamais quel que soit le contenu --
-    # -- Titre : ADAPTÉ À CHAQUE ÉPISODE (auparavant un unique texte en dur,
-    #    "El Nino could push global temperature towards +2C in early 2027",
-    #    réutilisé tel quel pour les 4 appels de la boucle -- donc affiché
-    #    aussi sur 1982-1983/1997-1998/2015-2016, sans rapport avec leur
-    #    contenu). Formulation neutre, factuelle, sans registre journalistique
-    #    ("could push"), cohérente avec un usage en revue de recherche : nom du
-    #    modèle, épisode, nature (rétrospective observée vs projection), et la
-    #    métrique réellement montrée sur la figure (anomalie au pic). --
+    # -- Header (title + subtitle) anchored in INCHES from the top,
+    #    not as a fraction of the figure -- independent of the number
+    #    of subtitle lines (automatic wrapping) and figure size, so it
+    #    never overflows regardless of the content. --
+    # -- Title: ADAPTED TO EACH EPISODE (previously a single hard-coded
+    #    text, "El Nino could push global temperature towards +2C in early
+    #    2027", reused unchanged for all 4 calls in the loop -- therefore
+    #    also displayed for 1982-1983/1997-1998/2015-2016, unrelated to
+    #    their actual content). Neutral, factual wording without
+    #    journalistic phrasing ("could push"), consistent with use in a
+    #    research paper: model name, episode, nature (observed retrospective
+    #    vs projection), and the metric actually shown on the figure
+    #    (peak anomaly). --
     is_projection = "projection" in label.lower()
     episode_clean = label.replace(" (projection)", "").strip()
     peak_val = float(decomp['total'].max())
     peak_date = decomp['total'].idxmax()
-    if is_projection:
-        title_txt = (f"TESR-modelled global temperature anomaly under the projected "
-                     f"{episode_clean} El Nino ({peak_val:+.2f} \u00b0C peak, {peak_date:%b %Y})")
-    else:
-        title_txt = (f"TESR-modelled El Nino contribution to the global temperature "
-                     f"anomaly, {episode_clean} ({peak_val:+.2f} \u00b0C peak, {peak_date:%b %Y})")
 
-    subtitle_ci = "Projection initialized 1 August 2026" if (has_ci and is_projection) else ""
-    subtitle_txt = (
-    f"Modelled anomaly with El Nino vs ENSO-neutral counterfactual - "
-    f"Departure from preindustrial (1850-1900) baseline, \u00b0C - "
-    f"TESR model, lag={lag} months          "
-    f"{subtitle_ci}"
+    if is_projection:
+        title_txt = (
+            f"TESR-modelled global temperature anomaly under the projected "
+            f"{episode_clean} El Nino ({peak_val:+.2f} \u00b0C peak, "
+            f"{peak_date:%b %Y})"
+        )
+    else:
+        title_txt = (
+            f"TESR-modelled El Nino contribution to the global temperature "
+            f"anomaly, {episode_clean} ({peak_val:+.2f} \u00b0C peak, "
+            f"{peak_date:%b %Y})"
+        )
+
+    subtitle_ci = (
+        "Projection initialized 1 August 2026"
+        if (has_ci and is_projection)
+        else ""
     )
-    subtitle_wrapped = textwrap.fill(subtitle_txt, width=150)
+
+    subtitle_txt = (
+        f"Modelled anomaly with El Nino vs ENSO-neutral counterfactual - "
+        f"Departure from preindustrial (1850-1900) baseline, \u00b0C - "
+        f"TESR model, lag={lag} months          "
+        f"{subtitle_ci}"
+    )
+
+    subtitle_wrapped = textwrap.fill(
+        subtitle_txt,
+        width=150
+    )
+
     n_sub_lines = subtitle_wrapped.count("\n") + 1
 
     title_top_in = 0.40
     subtitle_top_in = title_top_in + 0.32
     ext_top_in = subtitle_top_in + 0.20 * n_sub_lines + 0.08
-    header_in = ext_top_in + (0.28 if n_obs > 0 else 0.08)
+    header_in = ext_top_in + (
+        0.28 if n_obs > 0 else 0.08
+    )
 
-    fig.suptitle(title_txt,
-                 fontsize=13.5, fontweight='bold', x=0.02, ha='left', va='top',
-                 y=1 - title_top_in / fig_h)
-    fig.text(0.02, 1 - subtitle_top_in / fig_h, subtitle_wrapped,
-              fontsize=9.5, style='italic', color='#444444', ha='left', va='top')
+    fig.suptitle(
+        title_txt,
+        fontsize=13.5,
+        fontweight='bold',
+        x=0.02,
+        ha='left',
+        va='top',
+        y=1 - title_top_in / fig_h
+    )
+
+    fig.text(
+        0.02,
+        1 - subtitle_top_in / fig_h,
+        subtitle_wrapped,
+        fontsize=9.5,
+        style='italic',
+        color='#444444',
+        ha='left',
+        va='top'
+    )
+
     if n_obs > 1 and ext_var_mean is not None:
-        fig.text(0.02, 1 - ext_top_in / fig_h,
-                  f"Mean verification \u2212 model gap over the observed period: "
-                  f"{ext_var_mean:+.2f} \u00b0C (n = {n_obs} months)",
-                  fontsize=9, fontweight='bold', color='#1a1a1a', ha='left', va='top')
+        fig.text(
+            0.02,
+            1 - ext_top_in / fig_h,
+            f"Mean verification \u2212 model gap over the observed period: "
+            f"{ext_var_mean:+.2f} \u00b0C (n = {n_obs} months)",
+            fontsize=9,
+            fontweight='bold',
+            color='#1a1a1a',
+            ha='left',
+            va='top'
+        )
 
-    # -- Légende SORTIE du cadre (à droite) -- figure élargie + marge droite
-    #    dédiée + police réduite pour que les 3 nouvelles entrées d'enveloppe
-    #    tiennent sans être coupées --
-    fig.subplots_adjust(top=1 - header_in / fig_h, bottom=0.16, right=0.71)
-    ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize=8.3, framealpha=0.9)
+    # -- Legend OUTSIDE the frame (on the right) -- wider figure +
+    #    dedicated right margin + reduced font size so that the 3 new
+    #    envelope entries fit without being clipped. --
+    fig.subplots_adjust(
+        top=1 - header_in / fig_h,
+        bottom=0.16,
+        right=0.71
+    )
 
-    fig.text(0.98, 0.01, "Data: ECMWF/Copernicus C3S - ERA5; Nino3.4 ClimateReanalyzer (1850-1900 baseline)",
-              fontsize=7.5, color='#666666', ha='right')
+    ax.legend(
+        loc='center left',
+        bbox_to_anchor=(1.02, 0.5),
+        fontsize=8.3,
+        framealpha=0.9
+    )
+
+    fig.text(
+        0.98,
+        0.01,
+        "Data: ECMWF/Copernicus C3S - ERA5; "
+        "Nino3.4 ClimateReanalyzer (1850-1900 baseline)",
+        fontsize=7.5,
+        color='#666666',
+        ha='right'
+    )
+
     plt.savefig(filename, dpi=300)
     plt.close()
     plt.rcParams['font.family'] = 'sans-serif'
+
     return filename
-
-
 # ----------------------------------------------------------------------
-# 6. FONCTION DISTINCTE : barres comparatives AU PAROXYSME ENSO + IC 90%
+# 6. DISTINCT FUNCTION: comparative bars AT ENSO PEAK + 90% CI
 # ----------------------------------------------------------------------
 def plot_bar_paroxysme_enso(decomps, labels, ci_by_episode_peak=None, peak_dates=None, verifs=None,
                              enso_uncertainty=None,
-                             filename="gmst_episodes_barres_paroxysme_enso.png"):
+                             filename="gmst_episodes_enso_peak_bars.png"):
     """
-    enso_uncertainty : dict optionnel {label: {'q0': {'ci_monthly': DataFrame}, 'q100': {...}, ...}},
-        tel que produit par build_pipeline(). Utilisé pour dériver le min/max
-        combiné (dispersion ENSO + bootstrap du modèle) DE LA CONTRIBUTION ENSO
-        AU MOIS DE PAROXYSME précis (pas une moyenne épisode) -- q0/ci_monthly
-        pour la borne basse (P5), q100/ci_monthly pour la borne haute (P95).
-        La MÊME logique (P5 sous q0 / P95 sous q100) est aussi appliquée à
-        Tendance et Saisonnier : c'est une incertitude INHÉRENTE AU MODÈLE
-        (le bootstrap ré-ajuste tendance+ENSO+saisonnier ensemble), pas
-        propre à la composante ENSO seule. Par construction, les triangles
-        min/max ne sont donc affichés QUE pour les labels présents dans
-        enso_uncertainty (en pratique, uniquement "2026-2027 (projection)"
-        -- les épisodes historiques ont un ENSO observé, sans scénario
-        multi-modèles à propager).
+    enso_uncertainty : optional dict {label: {'q0': {'ci_monthly': DataFrame}, 'q100': {...}, ...}},
+        as produced by build_pipeline(). Used to derive the combined min/max
+        (ENSO spread + model bootstrap uncertainty) OF THE SPECIFIC ENSO PEAK MONTH
+        (not an episode average) -- q0/ci_monthly for the lower bound (P5),
+        q100/ci_monthly for the upper bound (P95).
+        The SAME logic (P5 under q0 / P95 under q100) is also applied to
+        Trend and Seasonal: this is MODEL-INHERENT uncertainty
+        (the bootstrap jointly refits trend + ENSO + seasonal components),
+        not uncertainty specific to the ENSO component alone.
+        Therefore, the min/max triangles are displayed ONLY for labels present
+        in enso_uncertainty (in practice, only "2026-2027 (projection)"
+        -- historical episodes use observed ENSO, without a
+        multi-model scenario to propagate).
     """
     rows = []
     dates_found = {}
@@ -999,25 +1497,26 @@ def plot_bar_paroxysme_enso(decomps, labels, ci_by_episode_peak=None, peak_dates
             if idx_paroxysme in cm_q0.index and idx_paroxysme in cm_q100.index:
                 enso_minmax_peak[l] = (cm_q0.loc[idx_paroxysme, 'enso_p5'],
                                         cm_q100.loc[idx_paroxysme, 'enso_p95'])
-                # -- Propagation de l'incertitude min/max ENSO sur les 2
-                #    AUTRES composantes (Tendance, Saisonnier) : incertitude
-                #    INHÉRENTE AU MODÈLE, pas une dispersion propre à ces
-                #    composantes -- le bootstrap par blocs mobiles ré-ajuste
-                #    le modèle ENTIER (tendance + ENSO + saisonnier ensemble)
-                #    sur des résidus ré-échantillonnés, donc un scénario ENSO
-                #    extrême (q0/q100) entraîne aussi une marge sur Tendance
-                #    et Saisonnier -- ce n'est pas visible en se limitant à
-                #    l'IC bootstrap du seul scénario central (ci_by_episode_peak).
-                #    On prend donc, comme pour ENSO, la borne basse (P5) sous
-                #    le scénario ENSO bas (q0) et la borne haute (P95) sous
-                #    le scénario ENSO haut (q100). --
+                # -- Propagation of ENSO min/max uncertainty to the 2 OTHER
+                #    components (Trend, Seasonal): MODEL-INHERENT uncertainty,
+                #    not uncertainty specific to these components -- the
+                #    moving-block bootstrap refits the ENTIRE model
+                #    (trend + ENSO + seasonal components together)
+                #    on resampled residuals, so an extreme ENSO scenario
+                #    (q0/q100) also produces a margin on Trend
+                #    and Seasonal -- this is not visible when using only
+                #    the bootstrap CI from the central scenario
+                #    (ci_by_episode_peak).
+                #    We therefore take, as for ENSO, the lower bound (P5) under
+                #    the low ENSO scenario (q0) and the upper bound (P95) under
+                #    the high ENSO scenario (q100). --
                 trend_minmax_peak[l] = (cm_q0.loc[idx_paroxysme, 'trend_p5'],
                                          cm_q100.loc[idx_paroxysme, 'trend_p95'])
                 seasonal_minmax_peak[l] = (cm_q0.loc[idx_paroxysme, 'seasonal_p5'],
                                             cm_q100.loc[idx_paroxysme, 'seasonal_p95'])
-        # -- variabilité externe AU mois de paroxysme (pas la moyenne
-        #    épisode) : écart verification - modèle ce mois-là, NaN si le
-        #    mois n'est pas encore observé (ex. fin de projection 26/27) --
+        # -- External variability AT THE PEAK MONTH (not the episode average):
+        #    verification minus model for this specific month, NaN if the
+        #    month has not yet been observed (e.g. end of the 2026-2027 projection) --
         ext_var = np.nan
         if verifs is not None and l in verifs:
             v_at = verifs[l].reindex(d.index).loc[idx_paroxysme]
@@ -1045,13 +1544,17 @@ def plot_bar_paroxysme_enso(decomps, labels, ci_by_episode_peak=None, peak_dates
     width = 0.19 if has_ext else 0.26
     offsets = [-1.5, -0.5, 0.5, 1.5] if has_ext else [-1, 0, 1]
 
-    b1 = ax.bar(x + offsets[0] * width, synth['trend'], width, color=COLOR_TREND, label="Trend (anthropogenic)")
-    b2 = ax.bar(x + offsets[1] * width, synth['enso'], width, color=COLOR_ENSO, label="ENSO (natural)")
-    b3 = ax.bar(x + offsets[2] * width, synth['seasonal'], width, color=COLOR_SEAS, label="Residual seasonal")
+    b1 = ax.bar(x + offsets[0] * width, synth['trend'], width,
+                color=COLOR_TREND, label="Trend (anthropogenic)")
+    b2 = ax.bar(x + offsets[1] * width, synth['enso'], width,
+                color=COLOR_ENSO, label="ENSO (natural)")
+    b3 = ax.bar(x + offsets[2] * width, synth['seasonal'], width,
+                color=COLOR_SEAS, label="Residual seasonal")
     b4 = None
     if has_ext:
         ext_plot = synth['ext_var'].fillna(0.0)
-        b4 = ax.bar(x + offsets[3] * width, ext_plot, width, color=COLOR_EXT,
+        b4 = ax.bar(x + offsets[3] * width, ext_plot, width,
+                    color=COLOR_EXT,
                     label="ENSO-external variability (verification minus model, at peak)")
 
     if ci_by_episode_peak is not None:
@@ -1068,24 +1571,28 @@ def plot_bar_paroxysme_enso(decomps, labels, ci_by_episode_peak=None, peak_dates
             ax.errorbar(xs, ys, yerr=[errs_lo, errs_hi], fmt='none',
                         ecolor='#1a1a1a', elinewidth=1.3, capsize=4, capthick=1.3, zorder=5)
 
-    # -- Points min/max, CENTRÉS sur chaque barre, calculés AVANT les
-    #    étiquettes (pour que le texte soit repoussé au-delà du triangle
-    #    le plus extrême) -- ENSO : incertitude combinée au mois de
-    #    paroxysme précis ; Tendance/Saisonnier : bornes P5/P95 du
-    #    bootstrap à ce même mois --
-    # -- trend_minmax_peak / seasonal_minmax_peak sont désormais construits
-    #    PLUS HAUT (dans la boucle rows), à partir des bandes q0/q100 de
-    #    enso_uncertainty -- donc automatiquement restreints aux labels
-    #    pour lesquels cette dispersion ENSO existe (2026-2027 (projection)
-    #    en pratique), et propageant l'incertitude min/max ENSO sur ces 2
-    #    composantes plutôt que l'IC bootstrap du seul scénario central. --
+    # -- Min/max points, CENTERED on each bar, calculated BEFORE the
+    #    labels (so that the text is pushed beyond the most extreme
+    #    triangle) -- ENSO: combined uncertainty at the specific
+    #    peak month; Trend/Seasonal: P5/P95 bounds from the bootstrap
+    #    at the same month --
+    # -- trend_minmax_peak / seasonal_minmax_peak are now built
+    #    ABOVE (inside the rows loop), from the q0/q100 bands of
+    #    enso_uncertainty -- therefore automatically restricted to labels
+    #    for which ENSO spread exists (in practice, 2026-2027 (projection)),
+    #    and propagating the ENSO min/max uncertainty to these 2 components
+    #    rather than using the bootstrap CI of the central scenario. --
     trend_minmax_xy = _add_minmax_markers(ax, b1, labels, trend_minmax_peak)
     enso_minmax_xy = _add_minmax_markers(
         ax, b2, labels, enso_minmax_peak,
         legend_labels=('Max (ENSO spread + model uncertainty)',
-                        'Min (ENSO spread + model uncertainty)'))
+                       'Min (ENSO spread + model uncertainty)'))
     seasonal_minmax_xy = _add_minmax_markers(ax, b3, labels, seasonal_minmax_peak)
-    minmax_by_comp = {'trend': trend_minmax_xy, 'enso': enso_minmax_xy, 'seasonal': seasonal_minmax_xy}
+    minmax_by_comp = {
+        'trend': trend_minmax_xy,
+        'enso': enso_minmax_xy,
+        'seasonal': seasonal_minmax_xy
+    }
 
     def label_bars(bars, pct_col, comp):
         for i, bar in enumerate(bars):
@@ -1115,17 +1622,25 @@ def plot_bar_paroxysme_enso(decomps, labels, ci_by_episode_peak=None, peak_dates
         label_bars(b4, 'ext_var_pct', 'ext_var')
 
     if ci_by_episode_peak is not None:
-        top_candidates = [synth['trend'].iloc[i] + _err_from_ci(synth['trend'].iloc[i], ci_by_episode_peak[l]['trend'])[1]
-                           for i, l in enumerate(labels)]
-        bottom_candidates = [synth['seasonal'].iloc[i] - _err_from_ci(synth['seasonal'].iloc[i], ci_by_episode_peak[l]['seasonal'])[0]
-                              for i, l in enumerate(labels)]
+        top_candidates = [
+            synth['trend'].iloc[i] +
+            _err_from_ci(synth['trend'].iloc[i], ci_by_episode_peak[l]['trend'])[1]
+            for i, l in enumerate(labels)
+        ]
+        bottom_candidates = [
+            synth['seasonal'].iloc[i] -
+            _err_from_ci(synth['seasonal'].iloc[i], ci_by_episode_peak[l]['seasonal'])[0]
+            for i, l in enumerate(labels)
+        ]
     else:
         top_candidates = list(synth['trend'])
         bottom_candidates = list(synth['seasonal'])
+
     if has_ext:
         ext_vals = synth['ext_var'].fillna(0.0)
         top_candidates = [max(t, e) for t, e in zip(top_candidates, ext_vals)]
         bottom_candidates = [min(b, e) for b, e in zip(bottom_candidates, ext_vals)]
+
     for xy in (trend_minmax_xy, enso_minmax_xy, seasonal_minmax_xy):
         if xy:
             top_candidates.append(max(mx for _, mx in xy.values()))
@@ -1137,50 +1652,65 @@ def plot_bar_paroxysme_enso(decomps, labels, ci_by_episode_peak=None, peak_dates
     for i, l in enumerate(labels):
         date_str = synth['date_paroxysme_enso'].iloc[i].strftime('%b %Y')
         ax.text(x[i], y_top * 0.985,
-                f"Total: {synth['total'].iloc[i]:+.2f} \u00b0C\n({date_str})",
+                f"Total: {synth['total'].iloc[i]:+.2f} °C\n({date_str})",
                 ha='center', va='top', fontsize=9, style='italic', color='#333333')
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=11)
     ax.axhline(0, color='#333333', lw=0.8)
-    ax.set_ylabel("Contribution to the GMSTA anomaly (\u00b0C, ref. 1850-1900)")
+    ax.set_ylabel("Contribution to the GMSTA anomaly (°C, ref. 1850-1900)")
     ax.set_ylim(y_bottom, y_top)
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.13), ncol=2 if has_ext else 3,
               fontsize=10, framealpha=0.9)
     ax.grid(axis='y', alpha=0.3)
 
     fig.subplots_adjust(bottom=0.24 if has_ext else 0.20)
-    # -- Titre/sous-titre : REFORMULÉS pour un usage preprint --
-    #    l'ancien titre ("El Nino could add +0.36C to global warming in
-    #    2027") était un chiffre en dur, non recalculé depuis `synth`, au
-    #    registre journalistique -- remplacé par un intitulé descriptif du
-    #    contenu réel de la figure (comparaison inter-épisodes au mois de
-    #    pic ENSO). L'ancien sous-titre tentait de forcer un retour à la
-    #    ligne avec une longue suite d'espaces avant "TESR model..." --
-    #    inefficace, car _draw_header passe le texte dans textwrap.fill(),
-    #    qui normalise tous les espaces (y compris "\n") avant de
-    #    ré-empaqueter selon wrap_width : un saut de ligne "manuel" dans la
-    #    chaîne n'a donc aucun effet. La ligne "TESR model..." est
-    #    maintenant portée par le paramètre extra_line de _draw_header,
-    #    prévu pour ça (déjà utilisé pour ce même besoin dans
-    #    plot_scenario_vs_contrefactuel_single) -- rendue en gras sur sa
-    #    propre ligne, sous le sous-titre. --
-    sous_titre = ("Anthropogenic trend, ENSO and residual seasonal contributions at the month of peak "
-                  "ENSO share, four El Nino episodes (July(n)-June(n+1))")
+
+    # -- Title/subtitle: REFORMULATED for preprint use --
+    #    the old title ("El Nino could add +0.36C to global warming in
+    #    2027") contained a hard-coded number, not recalculated from
+    #    `synth`, and used a journalistic tone -- replaced by a descriptive
+    #    title reflecting the actual content of the figure (inter-episode
+    #    comparison at the ENSO peak month). The old subtitle attempted
+    #    to force a line break using a long sequence of spaces before
+    #    "TESR model..." -- ineffective because _draw_header passes the
+    #    text through textwrap.fill(), which normalizes all whitespace
+    #    (including "\n") before wrapping according to wrap_width.
+    #    The "TESR model..." line is now passed through the extra_line
+    #    parameter of _draw_header, specifically designed for this purpose
+    #    (already used for the same need in
+    #    plot_scenario_vs_contrefactuel_single) -- displayed in bold on
+    #    its own line below the subtitle. --
+    sous_titre = (
+        "Anthropogenic trend, ENSO and residual seasonal contributions at the month "
+        "of peak ENSO share, four El Niño episodes (July(n)-June(n+1))"
+    )
     if ci_by_episode_peak is not None:
         sous_titre += " ; 90% CI by moving-block bootstrap (n=300)"
     if has_ext:
-        sous_titre += " ; 4th bar = verification-model gap at peak month (n.d. = not yet observed)"
+        sous_titre += (
+            " ; 4th bar = verification-model gap at peak month "
+            "(n.d. = not yet observed)"
+        )
     if enso_minmax_xy:
-        sous_titre += (" ; triangles = min/max ENSO contribution at peak month (multi-model ENSO "
-                        "spread + model bootstrap uncertainty)")
+        sous_titre += (
+            " ; triangles = min/max ENSO contribution at peak month "
+            "(multi-model ENSO spread + model bootstrap uncertainty)"
+        )
+
     extra_line = "TESR model - 1850-1900 baseline - projection initialized 1 August 2026"
-    header_in = _draw_header(fig, fig_h,
-                              "Peak-month decomposition of the global temperature anomaly across El Nino episodes",
-                              sous_titre, extra_line=extra_line)
+    header_in = _draw_header(
+        fig, fig_h,
+        "Peak-month decomposition of the global temperature anomaly across El Niño episodes",
+        sous_titre,
+        extra_line=extra_line
+    )
     fig.subplots_adjust(top=1 - header_in / fig_h)
-    fig.text(0.98, 0.01, "Data: ECMWF/Copernicus C3S - ERA5; Nino3.4 ClimateReanalyzer (1850-1900 baseline)",
-              fontsize=7.5, color='#666666', ha='right')
+    fig.text(
+        0.98, 0.01,
+        "Data: ECMWF/Copernicus C3S - ERA5; Nino3.4 ClimateReanalyzer (1850-1900 baseline)",
+        fontsize=7.5, color='#666666', ha='right'
+    )
     plt.savefig(filename, dpi=300)
     plt.close()
     plt.rcParams['font.family'] = 'sans-serif'
@@ -1188,26 +1718,27 @@ def plot_bar_paroxysme_enso(decomps, labels, ci_by_episode_peak=None, peak_dates
 
 
 # ----------------------------------------------------------------------
-# 6bis. TABLEAU MENSUEL DÉTAILLÉ PAR ÉPISODE (hindcast 82/83, 97/98,
-#       15/16 + prévision 26/27 -- même esprit visuel que le tableau de
-#       synthèse mensuelle déjà utilisé pour 2026-2027 dans
-#       enso_gmst_model.py, étendu à tous les épisodes et à la nouvelle
-#       colonne "ENSO-external variability")
+# 6bis. DETAILED MONTHLY TABLE BY EPISODE (hindcast 82/83, 97/98,
+#       15/16 + forecast 26/27 -- same visual approach as the monthly
+#       summary table already used for 2026-2027 in enso_gmst_model.py,
+#       extended to all episodes and with the new
+#       "ENSO-external variability" column)
 # ----------------------------------------------------------------------
 def plot_monthly_attribution_table(label, decomp, verif=None, ci_monthly=None, filename=None):
     d = decomp.copy()
     d['enso_pct'] = 100 * d['enso'] / d['total']
     d['trend_pct'] = 100 * d['trend'] / d['total']
     d['seasonal_pct'] = 100 * d['seasonal'] / d['total']
-    # -- Contrefactuel ENSO neutre = Tendance + Saisonnier (= la courbe
-    #    grise en tirets du graphique scénario-vs-contrefactuel). C'est
-    #    CE total-là, et non la Tendance seule, qui sert de référence pour
-    #    isoler ENSO : ENSO = Modèle - Contrefactuel = Total - Tendance -
-    #    Saisonnier (exact par construction de la décomposition linéaire,
-    #    vérifiable colonne par colonne). La Tendance seule est quasi
-    #    plate sur un épisode (12 mois) ; c'est le Contrefactuel, avec le
-    #    cycle saisonnier résiduel dedans, qui oscille au-dessus/dessous.
+
+    # -- ENSO-neutral counterfactual = Trend + Seasonal (= the dashed
+    #    grey curve in the scenario-vs-counterfactual graph). This is
+    #    THE total used as the reference to isolate ENSO: ENSO = Model -
+    #    Counterfactual = Total - Trend - Seasonal (exact by construction
+    #    of the linear decomposition, verifiable row by row). Trend alone
+    #    is nearly flat over an episode (12 months); the Counterfactual,
+    #    which includes the residual seasonal cycle, oscillates above/below. --
     d['contrefactuel'] = d['trend'] + d['seasonal']
+
     if verif is not None:
         d['verif'] = verif.reindex(d.index)
         d['ext_var'] = compute_external_variability(d, d['verif'])
@@ -1219,82 +1750,124 @@ def plot_monthly_attribution_table(label, decomp, verif=None, ci_monthly=None, f
 
     has_ci = ci_monthly is not None
     if has_ci:
-        d = d.join(ci_monthly[['enso_p5', 'enso_p95', 'enso_pct_p5', 'enso_pct_p95',
-                                'trend_p5', 'trend_p95', 'trend_pct_p5', 'trend_pct_p95',
-                                'seasonal_p5', 'seasonal_p95', 'seasonal_pct_p5', 'seasonal_pct_p95',
-                                'total_p5', 'total_p95',
-                                'contrefactuel_p5', 'contrefactuel_p95']])
-        # -- IC de la variabilité externe, DÉRIVÉ de celui du total (verif est
-        #    une observation fixe, pas une quantité bootstrappée) : signe inversé
-        #    car ext_var = verif - total -> borne basse de l'écart quand le
-        #    modèle est à sa borne HAUTE, et inversement. --
+        d = d.join(ci_monthly[
+            ['enso_p5', 'enso_p95', 'enso_pct_p5', 'enso_pct_p95',
+             'trend_p5', 'trend_p95', 'trend_pct_p5', 'trend_pct_p95',
+             'seasonal_p5', 'seasonal_p95', 'seasonal_pct_p5', 'seasonal_pct_p95',
+             'total_p5', 'total_p95',
+             'contrefactuel_p5', 'contrefactuel_p95']
+        ])
+
+        # -- CI of external variability, DERIVED from the total's CI
+        #    (verification is a fixed observation and is not bootstrapped):
+        #    sign is reversed because ext_var = verification - total -> lower
+        #    bound of the difference when the model is at its UPPER bound,
+        #    and vice versa. --
         d['ext_var_p5'] = d['verif'] - d['total_p95']
         d['ext_var_p95'] = d['verif'] - d['total_p5']
-        # % de variabilité externe : dérivé de même à partir de ext_var_p5/p95
-        # (pas de la CI du total directement, car on divise par 'total' -- point
-        # estimate -- pas par une quantité elle-même bootstrappée ici)
+
+        # Percentage of external variability: derived in the same way from
+        # ext_var_p5/p95 (not directly from the total CI, because we divide
+        # by 'total' -- the point estimate -- rather than by a bootstrapped
+        # quantity here).
         d['ext_var_pct_p5'] = 100 * d['ext_var_p5'] / d['total']
         d['ext_var_pct_p95'] = 100 * d['ext_var_p95'] / d['total']
 
     if filename is None:
         safe = label.replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
-        filename = f"gmst_table_episode_{safe}.png"
+        filename = f"gmst_monthly_attribution_table_{safe}.png"
 
     n_rows = len(d)
-    # -- header_inches couvre suptitle + jusqu'à 3 lignes de sous-titre
-    #    (description + IC + note °†) -- fixé au pire cas plutôt que calculé
-    #    après coup, car le nombre de lignes n'est connu qu'après la boucle
-    #    cell_text (any_pct_flagged). Évite tout chevauchement avec le tableau. --
+
+    # -- header_inches covers the suptitle + up to 3 subtitle lines
+    #    (description + CI + °† note) -- fixed to the worst-case rather
+    #    than calculated afterwards, because the number of lines is only
+    #    known after the cell_text loop (any_pct_flagged). Prevents overlap
+    #    with the table. --
     header_inches = 1.55
-    # -- Cellules à 2 lignes (°C sur la 1ère, % sur la 2e) pour les 4
-    #    colonnes de contribution -- ligne un peu plus haute qu'avant. --
+
+    # -- 2-line cells (°C on the first line, % on the second) for the 4
+    #    contribution columns -- slightly taller row than before. --
     fig_height = max(3.6, 0.44 * n_rows + 0.5) + header_inches
-    # -- 8 colonnes au lieu de 10 (°C et % fusionnés par cellule) : la
-    #    figure peut donc être un peu moins large qu'avant tout en
-    #    restant confortable, sans compresser le texte (police 9pt). --
+
+    # -- 8 columns instead of 10 (°C and % merged into a single cell):
+    #    the figure can therefore be slightly narrower while remaining
+    #    comfortable and without compressing the text (9pt font). --
     fig_width = 22 if has_ci else 15
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     ax.axis('off')
     plt.rcParams['font.family'] = 'serif'
 
-    col_labels = ['Month', 'Model (\u00b0C)', 'Trend (\u00b0C | %)', 'Seasonal (\u00b0C | %)',
-                  'Counterfactual\n(trend+seasonal, \u00b0C)', 'ENSO (\u00b0C | %)',
-                  'Verification (\u00b0C)', 'External variability (\u00b0C | %)']
+    col_labels = [
+        'Month',
+        'Model (°C)',
+        'Trend (°C | %)',
+        'Seasonal (°C | %)',
+        'Counterfactual\n(trend+seasonal, °C)',
+        'ENSO (°C | %)',
+        'Verification (°C)',
+        'External variability (°C | %)'
+    ]
 
-    PCT_ALERT_THRESHOLD = 100  # au-delà, la part en % devient un artefact de
-                                # signes opposés (cf. note de bas de figure) plutôt
-                                # qu'une lecture directe de la contribution
-    any_pct_flagged = [False]  # mutable pour être mis à jour depuis _fmt_pair
+    PCT_ALERT_THRESHOLD = 100  # above this threshold, the percentage share
+                                # becomes an artifact of opposite signs
+                                # (see figure footnote) rather than a direct
+                                # interpretation of the contribution
+
+    any_pct_flagged = [False]  # mutable so it can be updated from _fmt_pair
 
     def _fmt_pair(val, pct, p5=None, p95=None, pct_p5=None, pct_p95=None):
-        """Cellule 2 lignes : °C [IC] en haut, % [IC] en dessous. IC omis
-        si p5/p95 valent None (mode sans bootstrap). Un "†" signale un % dont
-        la magnitude dépasse PCT_ALERT_THRESHOLD -- artefact possible quand
-        une autre composante (souvent le Saisonnier) est de signe opposé au
-        Total, et non une erreur de calcul (cf. note de bas de figure)."""
+        """2-line cell: °C [CI] on top, % [CI] below.
+        CI omitted if p5/p95 are None (no-bootstrap mode).
+        A "†" flags a percentage whose magnitude exceeds
+        PCT_ALERT_THRESHOLD -- a possible artifact when another
+        component (often Seasonal) has the opposite sign to the Total,
+        rather than a calculation error (see figure footnote).
+        """
         flag = "†" if abs(pct) > PCT_ALERT_THRESHOLD else ""
         if flag:
             any_pct_flagged[0] = True
         if p5 is None:
             return f"{val:+.2f} °C\n{pct:+.0f}%{flag}"
-        return (f"{val:+.2f} °C [{p5:+.2f};{p95:+.2f}] °C\n"
-                f"{pct:+.0f}%{flag} [{pct_p5:+.0f};{pct_p95:+.0f}]%")
+        return (
+            f"{val:+.2f} °C [{p5:+.2f};{p95:+.2f}] °C\n"
+            f"{pct:+.0f}%{flag} [{pct_p5:+.0f};{pct_p95:+.0f}]%"
+        )
 
     cell_text = []
     for m, row in d.iterrows():
         verif_str = f"{row['verif']:+.2f}" if pd.notna(row['verif']) else "—"
+
         if has_ci:
-            total_str = f"{row['total']:+.2f} °C [{row['total_p5']:+.2f};{row['total_p95']:+.2f}] °C"
-            trend_str = _fmt_pair(row['trend'], row['trend_pct'], row['trend_p5'], row['trend_p95'],
-                                   row['trend_pct_p5'], row['trend_pct_p95'])
-            seas_str = _fmt_pair(row['seasonal'], row['seasonal_pct'], row['seasonal_p5'], row['seasonal_p95'],
-                                  row['seasonal_pct_p5'], row['seasonal_pct_p95'])
-            cf_str = f"{row['contrefactuel']:+.2f} °C [{row['contrefactuel_p5']:+.2f};{row['contrefactuel_p95']:+.2f}] °C"
-            enso_str = _fmt_pair(row['enso'], row['enso_pct'], row['enso_p5'], row['enso_p95'],
-                                  row['enso_pct_p5'], row['enso_pct_p95'])
+            total_str = (
+                f"{row['total']:+.2f} °C "
+                f"[{row['total_p5']:+.2f};{row['total_p95']:+.2f}] °C"
+            )
+            trend_str = _fmt_pair(
+                row['trend'], row['trend_pct'],
+                row['trend_p5'], row['trend_p95'],
+                row['trend_pct_p5'], row['trend_pct_p95']
+            )
+            seas_str = _fmt_pair(
+                row['seasonal'], row['seasonal_pct'],
+                row['seasonal_p5'], row['seasonal_p95'],
+                row['seasonal_pct_p5'], row['seasonal_pct_p95']
+            )
+            cf_str = (
+                f"{row['contrefactuel']:+.2f} °C "
+                f"[{row['contrefactuel_p5']:+.2f};{row['contrefactuel_p95']:+.2f}] °C"
+            )
+            enso_str = _fmt_pair(
+                row['enso'], row['enso_pct'],
+                row['enso_p5'], row['enso_p95'],
+                row['enso_pct_p5'], row['enso_pct_p95']
+            )
             if pd.notna(row['ext_var']):
-                ext_str = _fmt_pair(row['ext_var'], row['ext_var_pct'], row['ext_var_p5'], row['ext_var_p95'],
-                                     row['ext_var_pct_p5'], row['ext_var_pct_p95'])
+                ext_str = _fmt_pair(
+                    row['ext_var'], row['ext_var_pct'],
+                    row['ext_var_p5'], row['ext_var_p95'],
+                    row['ext_var_pct_p5'], row['ext_var_pct_p95']
+                )
             else:
                 ext_str = "—"
         else:
@@ -1303,7 +1876,11 @@ def plot_monthly_attribution_table(label, decomp, verif=None, ci_monthly=None, f
             seas_str = _fmt_pair(row['seasonal'], row['seasonal_pct'])
             cf_str = f"{row['contrefactuel']:+.2f} °C"
             enso_str = _fmt_pair(row['enso'], row['enso_pct'])
-            ext_str = _fmt_pair(row['ext_var'], row['ext_var_pct']) if pd.notna(row['ext_var']) else "—"
+            ext_str = (
+                _fmt_pair(row['ext_var'], row['ext_var_pct'])
+                if pd.notna(row['ext_var']) else "—"
+            )
+
         cell_text.append([
             m.strftime('%b %Y'),
             total_str,
@@ -1315,62 +1892,105 @@ def plot_monthly_attribution_table(label, decomp, verif=None, ci_monthly=None, f
             ext_str,
         ])
 
-    table_frac_height = min(0.95, (0.44 * n_rows + 0.15) / (fig_height - header_inches - 0.02))
-    table = ax.table(cellText=cell_text, colLabels=col_labels,
-                      bbox=[0.0, 1.0 - table_frac_height, 1.0, table_frac_height],
-                      cellLoc='center', colLoc='center')
+    table_frac_height = min(
+        0.95,
+        (0.44 * n_rows + 0.15) / (fig_height - header_inches - 0.02)
+    )
+
+    table = ax.table(
+        cellText=cell_text,
+        colLabels=col_labels,
+        bbox=[0.0, 1.0 - table_frac_height, 1.0, table_frac_height],
+        cellLoc='center',
+        colLoc='center'
+    )
+
     table.auto_set_font_size(False)
     table.set_fontsize(9)
-    table.scale(1, 2.0)  # cellules à 2 lignes (°C + %) -> lignes plus hautes qu'avant
+    table.scale(1, 2.0)  # 2-line cells (°C + %) -> taller rows
+
     for (r, c), cell in table.get_celld().items():
         cell.set_edgecolor('#dddddd')
         if r == 0:
             cell.set_facecolor('#1a1a1a')
             cell.set_text_props(color='white', fontweight='bold')
-        elif c in (3, 4):  # colonnes Saisonnier + Contrefactuel -- teinte grise (Contrefactuel = Tendance+Saisonnier)
+        elif c in (3, 4):  # Seasonal + Counterfactual columns --
+                            # grey tint (Counterfactual = Trend + Seasonal)
             cell.set_facecolor('#e8e8e8' if r % 2 == 0 else '#f4f4f4')
-        elif c in (6, 7):  # colonnes verification / variabilité externe -- teinte distincte
+        elif c in (6, 7):  # Verification / External variability columns --
+                            # distinct tint
             cell.set_facecolor(light_tint(RECORD, 0.06) if r % 2 == 0 else 'white')
         else:
             cell.set_facecolor(light_tint(FACTUAL, 0.08) if r % 2 == 0 else 'white')
 
     n_obs = int(d['verif'].notna().sum())
-    # -- Positions ancrées en POUCES fixes depuis le haut (via va='top'), pas
-    #    en fraction de fig_height : évite tout recalibrage manuel si
-    #    header_inches ou le nombre de lignes du sous-titre change à l'avenir. --
+
+    # -- Positions anchored at FIXED INCHES from the top (using va='top'),
+    #    rather than as a fraction of fig_height: avoids recalibration if
+    #    header_inches or the number of subtitle lines changes in the future. --
     TITLE_TOP_IN = 0.32
     SUBTITLE_TOP_IN = 0.62
-    fig.suptitle(f"Detailed monthly table - {label}",
-                 fontsize=14.5, fontweight='bold', x=0.02, ha='left', va='top',
-                 y=1 - TITLE_TOP_IN / fig_height)
+
+    fig.suptitle(
+        f"Detailed monthly table - {label}",
+        fontsize=14.5,
+        fontweight='bold',
+        x=0.02,
+        ha='left',
+        va='top',
+        y=1 - TITLE_TOP_IN / fig_height
+    )
+
     subtitle_lines = [
         "TESR model - exact linear decomposition; ENSO = Model - Counterfactual "
         "(= Trend + Seasonal); Seasonal isolated separately from the Counterfactual to assess "
         "its own share; verification = ERA5/C3S observation "
-        f"({n_obs}/{n_rows} mois observés, réf. 1850-1900)"
+        f"({n_obs}/{n_rows} months observed, ref. 1850-1900)"
     ]
+
     if has_ci:
         subtitle_lines.append(
             "90% CI by moving-block bootstrap (n=300, Kunsch 1989) on all columns "
-            "except Verification (fixed observation); CI of the External variability derived by symmetry "
-            "of the Model's (sign reversed)"
+            "except Verification (fixed observation); CI of External variability derived "
+            "by symmetry of the Model's (sign reversed)"
         )
+
     if any_pct_flagged[0]:
         subtitle_lines.append(
-            "†: |%| > 100 -- Trend+Seasonal+ENSO=Total is exact in °C, but an individual % can "
-            "exceed 100 (or be negative) when another component has a sign opposite to the Total "
-            "(often the Seasonal term); trust the °C value in that case, not the %"
+            "†: |%| > 100 -- Trend+Seasonal+ENSO=Total is exact in °C, but an individual % "
+            "can exceed 100 (or be negative) when another component has a sign opposite "
+            "to the Total (often the Seasonal term); trust the °C value in that case, "
+            "not the %"
         )
+
     if "projection" in label.lower():
         subtitle_lines.append("Official scenario, initialized 1 August 2026")
+
     sous_titre = "\n".join(subtitle_lines)
-    fig.text(0.02, 1 - SUBTITLE_TOP_IN / fig_height, sous_titre, fontsize=9.3, style='italic',
-             color='#444444', ha='left', va='top')
-    fig.text(0.98, 0.01, "Data: ECMWF/Copernicus C3S - ERA5; Nino3.4 ClimateReanalyzer (ref. 1850-1900)",
-              fontsize=7.5, color='#666666', ha='right')
+
+    fig.text(
+        0.02,
+        1 - SUBTITLE_TOP_IN / fig_height,
+        sous_titre,
+        fontsize=9.3,
+        style='italic',
+        color='#444444',
+        ha='left',
+        va='top'
+    )
+
+    fig.text(
+        0.98,
+        0.01,
+        "Data: ECMWF/Copernicus C3S - ERA5; Nino3.4 ClimateReanalyzer (ref. 1850-1900)",
+        fontsize=7.5,
+        color='#666666',
+        ha='right'
+    )
 
     top_frac = 1 - header_inches / fig_height
     ax.set_position([0.015, 0.02, 0.97, top_frac - 0.02])
+
     plt.savefig(filename, dpi=300)
     plt.close()
     plt.rcParams['font.family'] = 'sans-serif'
@@ -1378,7 +1998,7 @@ def plot_monthly_attribution_table(label, decomp, verif=None, ci_monthly=None, f
 
 
 # ----------------------------------------------------------------------
-# 7. EXÉCUTION
+# 7. EXECUTION
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
     pipe = build_pipeline()
@@ -1387,17 +2007,18 @@ if __name__ == "__main__":
     X_train, y_train, calendars = pipe['X_train'], pipe['y_train'], pipe['calendars']
     gmst_df = pipe['gmst_df']
 
-    # -- Vérification (observation ERA5/C3S) par épisode -- NaN pour les
-    #    mois pas encore observés (fin de la projection 2026-2027) --
+    # -- Verification (ERA5/C3S observation) by episode -- NaN for months
+    #    not yet observed (end of the 2026-2027 projection) --
     verifs = {l: get_verification(gmst_df, decomps[l]) for l in labels}
     for l in labels:
         n_obs = int(verifs[l].notna().sum())
-        print(f"  Vérification {l} : {n_obs}/{len(decomps[l])} mois observés")
+        print(f"  Verification {l}: {n_obs}/{len(decomps[l])} observed months")
 
-    N_BOOT = 300  # 300 répliques : bon compromis précision/temps de calcul
+    N_BOOT = 300  # 300 replicates: good compromise between precision and computation time
 
-    print("\n=== Bootstrap par blocs mobiles (IC 90%) -- un run par épisode ===")
+    print("\n=== Moving-block bootstrap (90% CI) -- one run per episode ===")
     raw_by_episode = {}
+
     for l in labels:
         print(f"  Bootstrap {l} (n={N_BOOT})...")
         raw_by_episode[l] = bootstrap_episode_raw(
@@ -1405,62 +2026,126 @@ if __name__ == "__main__":
             calendars[l], n_boot=N_BOOT, block_size=12, seed=42
         )
 
-    # -- IC pour la moyenne sur l'épisode (barres comparatif °C et %) --
-    ci_mean_by_episode = {l: ci_mean_over_episode(raw_by_episode[l]) for l in labels}
-    # -- IC mois par mois (tableau détaillé) --
-    ci_monthly_by_episode = {l: ci_all_dates(raw_by_episode[l]) for l in labels}
+    # -- CI for the episode average (comparative °C and % bars) --
+    ci_mean_by_episode = {
+        l: ci_mean_over_episode(raw_by_episode[l])
+        for l in labels
+    }
 
-    # -- Points min/max ENSO COMBINÉS (dispersion multi-modèles ENSO -- bornes
-    #    q0/q100 -- EMPILÉE avec l'IC 90% bootstrap du modèle à ces bornes),
-    #    moyennés sur l'épisode -- pour les barres ENSO des diagrammes
-    #    d'attribution comparatif (°C) et pourcentage (%) --
+    # -- Month-by-month CI (detailed table) --
+    ci_monthly_by_episode = {
+        l: ci_all_dates(raw_by_episode[l])
+        for l in labels
+    }
+
+    # -- COMBINED ENSO min/max points (multi-model ENSO spread -- q0/q100
+    #    bounds -- COMBINED with the model's 90% bootstrap CI at these bounds),
+    #    averaged over the episode -- for ENSO bars in the comparative
+    #    attribution diagrams (°C) and percentages (%) --
     enso_uncertainty = pipe.get('enso_uncertainty', {})
+
     enso_minmax = {
-        l: (bands['q0']['ci_mean']['enso'][0], bands['q100']['ci_mean']['enso'][2])
-        for l, bands in enso_uncertainty.items()
-    }
-    enso_minmax_pct = {
-        l: (bands['q0']['ci_mean']['enso_pct'][0], bands['q100']['ci_mean']['enso_pct'][2])
+        l: (
+            bands['q0']['ci_mean']['enso'][0],
+            bands['q100']['ci_mean']['enso'][2]
+        )
         for l, bands in enso_uncertainty.items()
     }
 
-    summary_moy = plot_bar_comparatif_moyenne(decomps, labels, ci_by_episode=ci_mean_by_episode,
-                                               verifs=verifs, enso_minmax=enso_minmax)
-    print("\n=== Synthèse moyenne épisode (avec IC 90%) ===")
+    enso_minmax_pct = {
+        l: (
+            bands['q0']['ci_mean']['enso_pct'][0],
+            bands['q100']['ci_mean']['enso_pct'][2]
+        )
+        for l, bands in enso_uncertainty.items()
+    }
+
+    summary_moy = plot_bar_comparatif_moyenne(
+        decomps,
+        labels,
+        ci_by_episode=ci_mean_by_episode,
+        verifs=verifs,
+        enso_minmax=enso_minmax
+    )
+
+    print("\n=== Episode-average summary (with 90% CI) ===")
+
     for l in labels:
         ci = ci_mean_by_episode[l]
-        ext_str = (f" ; variabilité externe = {summary_moy.loc[l,'ext_var']:+.3f}°C "
-                    f"({summary_moy.loc[l,'ext_var_pct']:+.1f}%, n={int(summary_moy.loc[l,'n_obs'])} mois)"
-                   if pd.notna(summary_moy.loc[l, 'ext_var']) else " ; variabilité externe = n.d.")
-        print(f"{l} : ENSO = {summary_moy.loc[l,'enso']:+.3f}°C "
-              f"[{ci['enso'][0]:+.3f}, {ci['enso'][2]:+.3f}] "
-              f"({summary_moy.loc[l,'enso_pct']:+.1f}% [{ci['enso_pct'][0]:+.1f}%, {ci['enso_pct'][2]:+.1f}%])" + ext_str)
+        ext_str = (
+            f" ; external variability = {summary_moy.loc[l,'ext_var']:+.3f}°C "
+            f"({summary_moy.loc[l,'ext_var_pct']:+.1f}%, "
+            f"n={int(summary_moy.loc[l,'n_obs'])} months)"
+            if pd.notna(summary_moy.loc[l, 'ext_var'])
+            else " ; external variability = n.d."
+        )
 
-    summary_pct = plot_bar_pourcentage(decomps, labels, ci_by_episode=ci_mean_by_episode, verifs=verifs,
-                                        enso_minmax_pct=enso_minmax_pct)
+        print(
+            f"{l}: ENSO = {summary_moy.loc[l,'enso']:+.3f}°C "
+            f"[{ci['enso'][0]:+.3f}, {ci['enso'][2]:+.3f}] "
+            f"({summary_moy.loc[l,'enso_pct']:+.1f}% "
+            f"[{ci['enso_pct'][0]:+.1f}%, {ci['enso_pct'][2]:+.1f}%])"
+            + ext_str
+        )
 
-    print("\n=== Génération des 4 graphiques scénario/contrefactuel séparés (+ verification) ===")
+    summary_pct = plot_bar_pourcentage(
+        decomps,
+        labels,
+        ci_by_episode=ci_mean_by_episode,
+        verifs=verifs,
+        enso_minmax_pct=enso_minmax_pct
+    )
+
+    print("\n=== Generating the 4 separate scenario/counterfactual plots (+ verification) ===")
+
     for l in labels:
-        fn = plot_scenario_vs_contrefactuel_single(l, decomps[l], lag, verif=verifs[l],
-                                                     ci_monthly=ci_monthly_by_episode[l],
-                                                     envelope=enso_uncertainty.get(l))
+        fn = plot_scenario_vs_contrefactuel_single(
+            l,
+            decomps[l],
+            lag,
+            verif=verifs[l],
+            ci_monthly=ci_monthly_by_episode[l],
+            envelope=enso_uncertainty.get(l)
+        )
         print(f"  -> {fn}")
 
-    print("\n=== Génération des tableaux mensuels détaillés (hindcast + prévision, avec IC 90% ENSO) ===")
+    print("\n=== Generating detailed monthly tables (hindcast + forecast, with 90% ENSO CI) ===")
+
     for l in labels:
-        _, fn = plot_monthly_attribution_table(l, decomps[l], verif=verifs[l], ci_monthly=ci_monthly_by_episode[l])
+        _, fn = plot_monthly_attribution_table(
+            l,
+            decomps[l],
+            verif=verifs[l],
+            ci_monthly=ci_monthly_by_episode[l]
+        )
         print(f"  -> {fn}")
 
-    print("\n=== Barres au paroxysme ENSO (part ENSO maximale) + IC 90% + variabilité externe ===")
-    # Il faut d'abord connaître la date de paroxysme (dépend du scénario central)
-    # avant de calculer l'IC à cette date précise
-    tmp_synth, peak_dates = plot_bar_paroxysme_enso(decomps, labels, verifs=verifs,
-                                                     enso_uncertainty=enso_uncertainty)  # 1er passage sans IC pour trouver les dates
-    ci_peak_by_episode = {l: ci_at_date(raw_by_episode[l], peak_dates[l]) for l in labels}
-    synth_paroxysme, _ = plot_bar_paroxysme_enso(decomps, labels, ci_by_episode_peak=ci_peak_by_episode,
-                                                  peak_dates=peak_dates, verifs=verifs,
-                                                  enso_uncertainty=enso_uncertainty)
+    print("\n=== Bars at ENSO peak (maximum ENSO share) + 90% CI + external variability ===")
+
+    # First determine the peak month (depends on the central scenario)
+    # before calculating the CI at that specific date.
+    tmp_synth, peak_dates = plot_bar_paroxysme_enso(
+        decomps,
+        labels,
+        verifs=verifs,
+        enso_uncertainty=enso_uncertainty
+    )  # First pass without CI to determine the dates
+
+    ci_peak_by_episode = {
+        l: ci_at_date(raw_by_episode[l], peak_dates[l])
+        for l in labels
+    }
+
+    synth_paroxysme, _ = plot_bar_paroxysme_enso(
+        decomps,
+        labels,
+        ci_by_episode_peak=ci_peak_by_episode,
+        peak_dates=peak_dates,
+        verifs=verifs,
+        enso_uncertainty=enso_uncertainty
+    )
+
     print(synth_paroxysme.round(3))
-    synth_paroxysme.to_csv("synthese_paroxysme_enso.csv")
+    synth_paroxysme.to_csv("enso_peak_synthesis.csv")
 
-    print("\nOK - tous les graphiques générés (avec IC 90% par bootstrap par blocs mobiles)")
+    print("\nOK - all plots generated (with 90% moving-block bootstrap CI)")
