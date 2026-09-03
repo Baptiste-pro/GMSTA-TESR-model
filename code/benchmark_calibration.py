@@ -64,7 +64,7 @@ disclosed simplification, not an oversight.
 Usage
 -----
     python benchmark_calibration.py --gmst data/era5_gmst_c3s.csv \\
-        --enso data/nino34_real.csv --threshold 1.0
+        --enso data/nino34_anomaly.csv --threshold 1.0
 
 Or import the functions directly:
 
@@ -428,9 +428,21 @@ def plot_reliability_diagram(calib_result, threshold=THRESHOLD_DEFAULT, filename
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gmst", default="C:/your_path/era5_gmst_c3s.csv") #enter path to the file
-    parser.add_argument("--enso", default="C:/your_path/nino34_anomaly.csv") #enter path to the file
-    parser.add_argument("--threshold", type=float, default=THRESHOLD_DEFAULT)
+    parser.add_argument(
+        "--gmst",
+        default="data/era5_gmst_c3s.csv",
+        help="Path to the GMSTA dataset"
+    )
+    parser.add_argument(
+        "--enso",
+        default="data/nino34_anomaly.csv",
+        help="Path to the Niño 3.4 dataset"
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=THRESHOLD_DEFAULT
+    )
     args = parser.parse_args()
 
     gmst_df = load_era5_gmst_c3s(args.gmst)
