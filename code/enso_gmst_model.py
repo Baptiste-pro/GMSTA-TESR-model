@@ -3503,11 +3503,11 @@ if __name__ == "__main__":
     # ==================================================================
     import os
 
-    PATH_GMST = os.environ.get("TESR_PATH_GMST", "C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/era5_gmst_c3s.csv")
-    PATH_ENSO = os.environ.get("TESR_PATH_ENSO", "C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/nino34_anomaly.csv")
+    PATH_GMST = os.environ.get("TESR_PATH_GMST", "data/era5_gmst_c3s.csv")
+    PATH_ENSO = os.environ.get("TESR_PATH_ENSO", "data/nino34_anomaly.csv")
     # Member-by-member Climate Dashboard file (multi-model ONI), used
     # below for the ENSO scenario and the peak-month distribution.
-    PATH_ENSO_MEMBERS = os.environ.get("TESR_PATH_ENSO_MEMBERS", "C:/Users/lolma/Documents/B/Climat temp autres/previ et fiab/Tendance saiso/ENSOT/enso_members_oni.csv")
+    PATH_ENSO_MEMBERS = os.environ.get("TESR_PATH_ENSO_MEMBERS", "data/enso_members_oni.csv")
 
     gmst_df = load_era5_gmst_c3s(PATH_GMST)
     enso_df_raw = load_enso_climatereanalyzer(PATH_ENSO)
